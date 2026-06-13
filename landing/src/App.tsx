@@ -188,7 +188,6 @@ MULTILINE_CERT=b64:LS0tLS1CRUdJTi...`}
 
       <footer className="foot">
         <span className="foot__mark"><Logo className="foot__logo" />wenvy</span>
-        <span className="foot__team">Team LXVII · DevSpace 2026</span>
         <span className="foot__note">plaintext never leaves your device</span>
       </footer>
     </>
