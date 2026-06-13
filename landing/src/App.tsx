@@ -31,7 +31,7 @@ export default function App() {
         <Koi className="koi koi--tl" />
         <Koi className="koi koi--br" />
 
-        <motion.div variants={container} initial="hidden" animate="show">
+        <motion.div className="hero__inner" variants={container} initial="hidden" animate="show">
           <motion.p className="hero__track" variants={item}>
             devtools &amp; infrastructure · secrets, versioned
           </motion.p>
@@ -187,7 +187,7 @@ MULTILINE_CERT=b64:LS0tLS1CRUdJTi...`}
 
       <footer className="foot">
         <span className="foot__mark">wenvy</span>
-        <span className="foot__team">Team LXVII · Adheesh Garg · Rishit Shivam · Harshit Narang · Ishaan Samdani · DevSpace 2026</span>
+        <span className="foot__team">Team LXVII · DevSpace 2026</span>
         <span className="foot__note">plaintext never leaves your device</span>
       </footer>
     </>
