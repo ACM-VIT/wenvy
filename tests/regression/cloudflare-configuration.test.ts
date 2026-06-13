@@ -218,4 +218,57 @@ describe("Cloudflare configuration regression", () => {
     expect(result.stdout).not.toContain(databaseUrl);
     expect(result.stdout).not.toContain("super-secret-password");
   });
+
+  it("skips resource creation commands during preflight when Cloudflare already has them", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wenvy-cloudflare-"));
+    const binDir = join(dir, "bin");
+    const configPath = join(dir, "wrangler.json");
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        workers_dev: false,
+        routes: [{ pattern: "api.wenvy.dev", custom_domain: true }],
+        r2_buckets: [{ binding: "WENVY_BLOBS", bucket_name: "wenvy-blobs-test" }],
+        kv_namespaces: [{ binding: "WENVY_CONFIG_CACHE", id: "kv-real-id" }],
+        queues: {
+          producers: [{ binding: "AUDIT_QUEUE", queue: "wenvy-audit-test" }],
+          consumers: [{ queue: "wenvy-audit-test" }]
+        },
+        hyperdrive: [{ binding: "WENVY_DB", id: "hyperdrive-real-id" }]
+      }),
+      "utf8"
+    );
+    await writeFile(
+      join(binDir, "cf"),
+      "#!/bin/sh\nif [ \"$1\" = \"context\" ] && [ \"$2\" = \"show\" ]; then printf '%s\\n' '{\"accountId\":{\"value\":\"account-1\",\"name\":\"Account\"},\"zone\":{\"value\":\"zone-wenvy\",\"name\":\"wenvy.dev\"}}'; exit 0; fi\nif [ \"$1\" = \"zones\" ] && [ \"$2\" = \"list\" ]; then printf '%s\\n' '[{\"id\":\"zone-wenvy\",\"name\":\"wenvy.dev\",\"account\":{\"id\":\"account-1\"}}]'; exit 0; fi\nexit 66\n",
+      "utf8"
+    );
+    await writeFile(
+      join(binDir, "pnpm"),
+      "#!/bin/sh\ncase \"$*\" in\n'exec wrangler whoami') printf '%s\\n' 'logged in as stub@example.test'; exit 0 ;;\n'exec wrangler r2 bucket list') printf '%s\\n' 'name:           wenvy-blobs-test'; exit 0 ;;\n'exec wrangler queues list') printf '%s\\n' 'id name' 'queue-id wenvy-audit-test'; exit 0 ;;\n'exec wrangler kv namespace list') printf '%s\\n' '[{\"id\":\"kv-real-id\",\"title\":\"WENVY_CONFIG_CACHE\"}]'; exit 0 ;;\n'exec wrangler hyperdrive list') printf '%s\\n' 'id name' 'hyperdrive-real-id wenvy-db-dev'; exit 0 ;;\nesac\nprintf 'UNEXPECTED_COMMAND: %s\\n' \"$*\" >&2\nexit 77\n",
+      "utf8"
+    );
+    await chmod(join(binDir, "cf"), 0o755);
+    await chmod(join(binDir, "pnpm"), 0o755);
+
+    const result = spawnSync("node_modules/.bin/tsx", ["scripts/bootstrap-cloudflare.ts", "--preflight"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        WENVY_WRANGLER_CONFIG: configPath,
+        WENVY_ENV_FILE: join(dir, "missing.env")
+      }
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("r2 bucket create");
+    expect(result.stdout).not.toContain("queues create");
+    expect(result.stdout).not.toContain("kv namespace create");
+    expect(result.stdout).not.toContain("hyperdrive create");
+    expect(result.stdout).toContain("pnpm exec wrangler deploy --dry-run --strict");
+    expect(result.stderr).not.toContain("UNEXPECTED_COMMAND");
+  });
 });

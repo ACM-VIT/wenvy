@@ -85,6 +85,14 @@ interface CloudflareEnvironment {
   readonly zoneId?: string;
 }
 
+interface ExistingCloudflareResources {
+  readonly r2Buckets: ReadonlySet<string>;
+  readonly queues: ReadonlySet<string>;
+  readonly kvNamespaces: ReadonlySet<string>;
+  readonly hyperdrives: ReadonlySet<string>;
+  readonly warnings: readonly string[];
+}
+
 loadLocalEnvFile();
 
 const configPath = process.env.WENVY_WRANGLER_CONFIG ?? "wrangler.jsonc";
@@ -97,7 +105,6 @@ function main(): void {
   const config = loadWranglerConfig();
   const unresolved = findUnresolvedPlaceholders(config);
   const domainProblems = findDomainProblems(config);
-  const commands = plannedInitializationCommands(config);
 
   const context = run("cf", ["context", "show"]);
   if (context.status !== 0) {
@@ -153,6 +160,30 @@ function main(): void {
     process.exit(1);
   }
 
+  const discoverExistingResources =
+    (apply || preflight) &&
+    wranglerAuthenticated &&
+    unresolved.length === 0 &&
+    domainProblems.length === 0 &&
+    targetZone.zone !== undefined;
+  const existingResources = discoverExistingResources
+    ? discoverExistingCloudflareResources(config, cloudflareEnvironment)
+    : undefined;
+
+  if (existingResources && existingResources.warnings.length > 0) {
+    process.stdout.write("Cloudflare resource discovery issues:\n");
+    for (const warning of existingResources.warnings) {
+      process.stdout.write(`- ${warning}\n`);
+    }
+    process.stdout.write("\n");
+    if (apply || preflight) {
+      process.stdout.write("Refusing to continue until existing resource discovery succeeds.\n");
+      process.exit(1);
+    }
+  }
+
+  const commands = plannedInitializationCommands(config, existingResources);
+
   if (!apply) {
     process.stdout.write("Planned initialization commands:\n");
     for (const command of commands) {
@@ -185,15 +216,23 @@ function loadWranglerConfig(): WranglerConfig {
   return JSON.parse(readFileSync(configPath, "utf8")) as WranglerConfig;
 }
 
-function plannedInitializationCommands(config: WranglerConfig): readonly PlannedCommand[] {
-  const r2Buckets = (config.r2_buckets ?? []).map((bucket) => bucket.bucket_name);
+function plannedInitializationCommands(
+  config: WranglerConfig,
+  existingResources?: ExistingCloudflareResources
+): readonly PlannedCommand[] {
+  const r2Buckets = (config.r2_buckets ?? [])
+    .map((bucket) => bucket.bucket_name)
+    .filter((bucket) => !existingResources?.r2Buckets.has(bucket));
   const queues = Array.from(
     new Set([
       ...(config.queues?.producers ?? []).map((producer) => producer.queue),
       ...(config.queues?.consumers ?? []).map((consumer) => consumer.queue)
     ])
-  );
-  const kvBindings = (config.kv_namespaces ?? []).map((namespace) => namespace.binding);
+  ).filter((queue) => !existingResources?.queues.has(queue));
+  const kvBindings = (config.kv_namespaces ?? [])
+    .filter((namespace) => namespace.id.startsWith("replace-with-"))
+    .filter((namespace) => !existingResources?.kvNamespaces.has(namespace.binding))
+    .map((namespace) => namespace.binding);
 
   return [
     ...r2Buckets.map((bucket) =>
@@ -207,6 +246,92 @@ function plannedInitializationCommands(config: WranglerConfig): readonly Planned
     plannedCommand("pnpm", ["exec", "wrangler", "deploy", "--dry-run", "--strict", "--config", configPath]),
     plannedCommand("pnpm", ["exec", "wrangler", "deploy", "--strict", "--config", configPath])
   ];
+}
+
+function discoverExistingCloudflareResources(
+  config: WranglerConfig,
+  cloudflareEnvironment: CloudflareEnvironment
+): ExistingCloudflareResources {
+  const warnings: string[] = [];
+  const r2Buckets = discoverMatchingResources({
+    label: "R2 buckets",
+    command: ["exec", "wrangler", "r2", "bucket", "list"],
+    expectedNames: (config.r2_buckets ?? []).map((bucket) => bucket.bucket_name),
+    cloudflareEnvironment,
+    warnings
+  });
+  const queues = discoverMatchingResources({
+    label: "Queues",
+    command: ["exec", "wrangler", "queues", "list"],
+    expectedNames: Array.from(
+      new Set([
+        ...(config.queues?.producers ?? []).map((producer) => producer.queue),
+        ...(config.queues?.consumers ?? []).map((consumer) => consumer.queue)
+      ])
+    ),
+    cloudflareEnvironment,
+    warnings
+  });
+  const kvNamespaces = discoverMatchingResources({
+    label: "KV namespaces",
+    command: ["exec", "wrangler", "kv", "namespace", "list"],
+    expectedNames: (config.kv_namespaces ?? []).map((namespace) => namespace.binding),
+    cloudflareEnvironment,
+    warnings
+  });
+  const hyperdrives = discoverMatchingResources({
+    label: "Hyperdrive configs",
+    command: ["exec", "wrangler", "hyperdrive", "list"],
+    expectedNames: Array.from(
+      new Set(
+        (config.hyperdrive ?? []).flatMap((hyperdrive) => [
+          hyperdrive.id,
+          hyperdriveName()
+        ])
+      )
+    ),
+    cloudflareEnvironment,
+    warnings
+  });
+
+  return {
+    r2Buckets,
+    queues,
+    kvNamespaces,
+    hyperdrives,
+    warnings
+  };
+}
+
+function discoverMatchingResources(options: {
+  readonly label: string;
+  readonly command: readonly string[];
+  readonly expectedNames: readonly string[];
+  readonly cloudflareEnvironment: CloudflareEnvironment;
+  readonly warnings: string[];
+}): ReadonlySet<string> {
+  if (options.expectedNames.length === 0) {
+    return new Set<string>();
+  }
+
+  const result = run("pnpm", options.command, options.cloudflareEnvironment);
+  if (result.status !== 0) {
+    options.warnings.push(
+      `${options.label} list failed: ${result.stderr.trim() || result.stdout.trim() || "unknown error"}`
+    );
+    return new Set<string>();
+  }
+
+  return new Set(options.expectedNames.filter((name) => outputContainsResourceName(result.stdout, name)));
+}
+
+function outputContainsResourceName(output: string, name: string): boolean {
+  const escaped = escapeRegExp(name);
+  return new RegExp(`(^|[^A-Za-z0-9_-])${escaped}([^A-Za-z0-9_-]|$)`, "u").test(output);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function printResourceSummary(config: WranglerConfig): void {
@@ -351,8 +476,12 @@ function plannedHyperdriveCommands(config: WranglerConfig): readonly PlannedComm
     return [];
   }
 
-  return (config.hyperdrive ?? []).map((hyperdrive) => {
-    const name = process.env.WENVY_HYPERDRIVE_NAME ?? "wenvy-db-dev";
+  return (config.hyperdrive ?? []).flatMap((hyperdrive) => {
+    if (!hyperdrive.id.startsWith("replace-with-")) {
+      return [];
+    }
+
+    const name = hyperdriveName();
     const args = [
       "exec",
       "wrangler",
@@ -367,8 +496,12 @@ function plannedHyperdriveCommands(config: WranglerConfig): readonly PlannedComm
       configPath
     ];
     const displayArgs = args.map((arg, index) => (args[index - 1] === "--connection-string" ? "<redacted>" : arg));
-    return plannedCommand("pnpm", args, displayArgs);
+    return [plannedCommand("pnpm", args, displayArgs)];
   });
+}
+
+function hyperdriveName(): string {
+  return process.env.WENVY_HYPERDRIVE_NAME ?? "wenvy-db-dev";
 }
 
 function plannedCommand(
