@@ -41,9 +41,13 @@ export interface WorkerEnv {
   readonly WENVY_CONFIG_CACHE: KVNamespace;
   readonly AUTH_TOKEN_COORDINATOR: DurableObjectNamespace;
   readonly REPO_BRANCH_COORDINATOR: DurableObjectNamespace;
+  readonly RATE_LIMIT_COORDINATOR: DurableObjectNamespace;
+  readonly GITHUB_DELIVERY_COORDINATOR: DurableObjectNamespace;
   readonly GITHUB_SYNC_QUEUE: Queue<GithubSyncMessage>;
   readonly AUDIT_QUEUE: Queue<AuditEventMessage>;
   readonly ENVELOPE_CHECK_QUEUE: Queue<EnvelopeCheckMessage>;
+  readonly EMAIL_QUEUE: Queue<unknown>;
+  readonly ROTATION_QUEUE: Queue<RotationWorkflowParams>;
   readonly KEY_ROTATION_WORKFLOW: WorkflowBinding<RotationWorkflowParams>;
   readonly GITHUB_WEBHOOK_SECRET?: string;
 }

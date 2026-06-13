@@ -1,10 +1,11 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node", "vitest/globals"]
+    "types": ["node", "vitest/globals", "@cloudflare/workers-types"]
   },
   "include": ["tests/**/*.ts"],
   "references": [
+    { "path": "packages/contracts" },
     { "path": "packages/domain" },
     { "path": "packages/terminal-client" },
     { "path": "apps/web-worker" }

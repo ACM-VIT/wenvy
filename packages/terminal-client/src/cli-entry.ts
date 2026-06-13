@@ -61,4 +61,14 @@ program
     }
   );
 
-await program.parseAsync();
+try {
+  await program.parseAsync();
+} catch (error) {
+  const message = error instanceof Error ? error.message : "unknown error";
+  process.stderr.write(`error: ${redactCliError(message)}\n`);
+  process.exitCode = 1;
+}
+
+function redactCliError(message: string): string {
+  return message.replace(/=.*/gu, "=<redacted>");
+}

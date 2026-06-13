@@ -1,0 +1,161 @@
+import { createHash } from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
+import { createHonoApp } from "../../apps/web-worker/src/worker/hono-app.js";
+import type { WorkerEnv } from "../../apps/web-worker/src/worker/worker-env.js";
+
+describe("Hono route regression", () => {
+  it("serves OpenAPI document", async () => {
+    const response = await createHonoApp().fetch(
+      new Request("https://wenvy.test/openapi.json"),
+      fakeEnv(),
+      fakeExecutionContext()
+    );
+    const body = (await response.json()) as { readonly openapi: string };
+
+    expect(response.status).toBe(200);
+    expect(body.openapi).toBe("3.1.0");
+  });
+
+  it("returns 400 for invalid contract payloads instead of internal-error", async () => {
+    const response = await createHonoApp().fetch(
+      new Request("https://wenvy.test/v1/service-accounts/authorize", {
+        method: "POST",
+        body: JSON.stringify({ status: "active" })
+      }),
+      fakeEnv(),
+      fakeExecutionContext()
+    );
+    const body = (await response.json()) as { readonly error: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("invalid-request");
+  });
+
+  it("authorizes service account decisions through the route", async () => {
+    const response = await createHonoApp().fetch(
+      new Request("https://wenvy.test/v1/service-accounts/authorize", {
+        method: "POST",
+        body: JSON.stringify({
+          status: "active",
+          allowedBranches: ["production"],
+          capabilities: "pull-only",
+          branchName: "production",
+          operation: "pull",
+          now: "2026-06-13T12:00:00.000Z"
+        })
+      }),
+      fakeEnv(),
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ allowed: true, reason: "allowed" });
+  });
+
+  it("rejects plaintext envelope payloads through the route", async () => {
+    const response = await createHonoApp().fetch(
+      new Request("https://wenvy.test/v1/envelopes/validate", {
+        method: "POST",
+        body: JSON.stringify({
+          envelope: {
+            encryptedTeamKey: "ciphertext",
+            teamKey: "plaintext"
+          }
+        })
+      }),
+      fakeEnv(),
+      fakeExecutionContext()
+    );
+    const body = (await response.json()) as { readonly reasons: readonly string[] };
+
+    expect(response.status).toBe(400);
+    expect(body.reasons).toContain("plaintext-not-allowed");
+  });
+
+  it("rejects snapshot blob uploads whose declared hash does not match ciphertext bytes", async () => {
+    const env = fakeEnv();
+    const response = await createHonoApp().fetch(
+      new Request("https://wenvy.test/v1/blobs/commit_01JY7X0WENVYAAA", {
+        method: "PUT",
+        headers: {
+          "x-ciphertext-sha256": "a".repeat(64)
+        },
+        body: "ciphertext"
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(400);
+    expect(env.WENVY_BLOBS.put).not.toHaveBeenCalled();
+  });
+
+  it("accepts matching encrypted blob uploads and writes to opaque R2 key", async () => {
+    const env = fakeEnv();
+    const bytes = "ciphertext";
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const response = await createHonoApp().fetch(
+      new Request("https://wenvy.test/v1/blobs/commit_01JY7X0WENVYAAA", {
+        method: "PUT",
+        headers: {
+          "x-ciphertext-sha256": digest
+        },
+        body: bytes
+      }),
+      env,
+      fakeExecutionContext()
+    );
+    const body = (await response.json()) as { readonly objectKey: string };
+
+    expect(response.status).toBe(200);
+    expect(body.objectKey).toMatch(/^snapshots\//u);
+    expect(env.WENVY_BLOBS.put).toHaveBeenCalledOnce();
+  });
+});
+
+function fakeEnv(): WorkerEnv {
+  return {
+    WENVY_DB: {} as Hyperdrive,
+    WENVY_BLOBS: {
+      put: vi.fn(async () => undefined)
+    } as unknown as R2Bucket,
+    WENVY_LOGS: {} as R2Bucket,
+    WENVY_CONFIG_CACHE: {} as KVNamespace,
+    AUTH_TOKEN_COORDINATOR: fakeDurableObjectNamespace(),
+    REPO_BRANCH_COORDINATOR: fakeDurableObjectNamespace(),
+    RATE_LIMIT_COORDINATOR: fakeDurableObjectNamespace(),
+    GITHUB_DELIVERY_COORDINATOR: fakeDurableObjectNamespace(),
+    GITHUB_SYNC_QUEUE: fakeQueue(),
+    AUDIT_QUEUE: fakeQueue(),
+    ENVELOPE_CHECK_QUEUE: fakeQueue(),
+    EMAIL_QUEUE: fakeQueue(),
+    ROTATION_QUEUE: fakeQueue(),
+    KEY_ROTATION_WORKFLOW: {
+      create: vi.fn(async () => ({ id: "workflow-instance" }))
+    },
+    GITHUB_WEBHOOK_SECRET: "secret"
+  };
+}
+
+function fakeQueue<T>(): Queue<T> {
+  return {
+    send: vi.fn(async () => undefined)
+  } as unknown as Queue<T>;
+}
+
+function fakeDurableObjectNamespace(): DurableObjectNamespace {
+  return {
+    idFromName: vi.fn(() => ({})),
+    get: vi.fn(() => ({
+      fetch: vi.fn(async () => Response.json({ status: "consumed" }))
+    }))
+  } as unknown as DurableObjectNamespace;
+}
+
+function fakeExecutionContext(): ExecutionContext {
+  return {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+    props: {}
+  };
+}

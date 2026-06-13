@@ -16,6 +16,14 @@
       {
         "name": "REPO_BRANCH_COORDINATOR",
         "class_name": "RepoBranchCoordinator"
+      },
+      {
+        "name": "RATE_LIMIT_COORDINATOR",
+        "class_name": "RateLimitCoordinator"
+      },
+      {
+        "name": "GITHUB_DELIVERY_COORDINATOR",
+        "class_name": "GithubDeliveryCoordinator"
       }
     ]
   },
@@ -23,6 +31,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["AuthTokenCoordinator", "RepoBranchCoordinator"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["RateLimitCoordinator", "GithubDeliveryCoordinator"]
     }
   ],
   "r2_buckets": [
@@ -54,6 +66,14 @@
       {
         "binding": "ENVELOPE_CHECK_QUEUE",
         "queue": "wenvy-envelope-check-dev"
+      },
+      {
+        "binding": "EMAIL_QUEUE",
+        "queue": "wenvy-email-dev"
+      },
+      {
+        "binding": "ROTATION_QUEUE",
+        "queue": "wenvy-rotation-dev"
       }
     ],
     "consumers": [
@@ -71,6 +91,16 @@
         "queue": "wenvy-envelope-check-dev",
         "max_batch_size": 10,
         "max_batch_timeout": 10
+      },
+      {
+        "queue": "wenvy-email-dev",
+        "max_batch_size": 25,
+        "max_batch_timeout": 10
+      },
+      {
+        "queue": "wenvy-rotation-dev",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5
       }
     ]
   },

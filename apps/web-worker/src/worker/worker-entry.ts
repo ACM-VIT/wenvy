@@ -1,5 +1,7 @@
 import { createHonoApp } from "./hono-app.js";
 import { AuthTokenCoordinator } from "./durable-objects/auth-token-coordinator.js";
+import { GithubDeliveryCoordinator } from "./durable-objects/github-delivery-coordinator.js";
+import { RateLimitCoordinator } from "./durable-objects/rate-limit-coordinator.js";
 import { RepoBranchCoordinator } from "./durable-objects/repo-branch-coordinator.js";
 import { dispatchQueue } from "./queue-consumers/queue-dispatch.js";
 import { RotationWorkflow } from "./workflows/rotation-workflow.js";
@@ -7,7 +9,13 @@ import type { WorkerEnv } from "./worker-env.js";
 
 const app = createHonoApp();
 
-export { AuthTokenCoordinator, RepoBranchCoordinator, RotationWorkflow };
+export {
+  AuthTokenCoordinator,
+  GithubDeliveryCoordinator,
+  RateLimitCoordinator,
+  RepoBranchCoordinator,
+  RotationWorkflow
+};
 
 export default {
   async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {

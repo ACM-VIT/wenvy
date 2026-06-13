@@ -29,7 +29,7 @@ export function parseEnvText(input: string): Array<[string, string]> {
     .map((line) => {
       const separatorIndex = line.indexOf("=");
       if (separatorIndex === -1) {
-        throw new Error(`Invalid env line without '=' separator: ${line}`);
+        throw new Error("Invalid env line without '=' separator");
       }
       return [line.slice(0, separatorIndex), line.slice(separatorIndex + 1)];
     });

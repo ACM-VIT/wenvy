@@ -15,6 +15,12 @@ export async function dispatchQueue(
     case "wenvy-envelope-check-dev":
       await acknowledgeBatch(batch);
       return;
+    case "wenvy-email-dev":
+      await acknowledgeBatch(batch);
+      return;
+    case "wenvy-rotation-dev":
+      await acknowledgeBatch(batch);
+      return;
     default:
       await env.AUDIT_QUEUE.send({
         action: "queue.unknown",

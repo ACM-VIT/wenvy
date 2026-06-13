@@ -11,6 +11,7 @@
     "cf:types": "wrangler types --config ../../wrangler.jsonc"
   },
   "dependencies": {
+    "@wenvy/contracts": "workspace:*",
     "@wenvy/domain": "workspace:*",
     "hono": "^4.12.25",
     "zod": "^4.2.0"

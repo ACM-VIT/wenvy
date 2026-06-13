@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "packages/contracts" },
     { "path": "packages/domain" },
     { "path": "packages/terminal-client" },
     { "path": "apps/web-worker" }

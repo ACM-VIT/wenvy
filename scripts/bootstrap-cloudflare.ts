@@ -11,7 +11,13 @@ const apply = process.argv.includes("--apply");
 
 const resources = {
   r2Buckets: ["wenvy-blobs-dev", "wenvy-logs-dev"],
-  queues: ["wenvy-github-sync-dev", "wenvy-audit-dev", "wenvy-envelope-check-dev"],
+  queues: [
+    "wenvy-github-sync-dev",
+    "wenvy-audit-dev",
+    "wenvy-envelope-check-dev",
+    "wenvy-email-dev",
+    "wenvy-rotation-dev"
+  ],
   kvNamespaces: ["WENVY_CONFIG_CACHE"]
 } as const;
 

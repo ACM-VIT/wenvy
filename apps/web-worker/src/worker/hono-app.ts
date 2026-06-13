@@ -1,9 +1,19 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { z } from "zod";
+import { ZodError } from "zod";
 import {
+  consumeTokenRequestSchema,
+  envelopeValidationRequestSchema,
+  openApiDocument,
+  pushIntentRequestSchema,
+  rotationRequestSchema,
+  serviceAccountAuthorizeRequestSchema
+} from "@wenvy/contracts";
+import {
+  authorizeServiceAccount,
   createSnapshotObjectKey,
   sha256Hex,
+  validateEnvelopePayload,
   verifyGithubWebhookSignature
 } from "@wenvy/domain";
 import type { WorkerEnv } from "./worker-env.js";
@@ -11,24 +21,6 @@ import type { WorkerEnv } from "./worker-env.js";
 type AppBindings = {
   Bindings: WorkerEnv;
 };
-
-const consumeTokenSchema = z.object({
-  token: z.string().min(16),
-  browserFingerprintHash: z.string().min(16).optional(),
-  ipAddress: z.string().optional()
-});
-
-const pushIntentSchema = z.object({
-  expectedHead: z.string().min(1).nullable(),
-  nextCommit: z.string().min(16),
-  idempotencyKey: z.string().min(16)
-});
-
-const rotationSchema = z.object({
-  rotationId: z.string().min(16),
-  scopeType: z.enum(["team", "repo"]),
-  scopeId: z.string().min(16)
-});
 
 export function createHonoApp(): Hono<AppBindings> {
   const app = new Hono<AppBindings>();
@@ -41,8 +33,10 @@ export function createHonoApp(): Hono<AppBindings> {
     })
   );
 
+  app.get("/openapi.json", (context) => context.json(openApiDocument));
+
   app.post("/v1/auth/magic-link/consume", async (context) => {
-    const input = consumeTokenSchema.parse(await context.req.json());
+    const input = consumeTokenRequestSchema.parse(await context.req.json());
     const tokenHash = await sha256Hex(input.token);
     const id = context.env.AUTH_TOKEN_COORDINATOR.idFromName(tokenHash);
     const stub = context.env.AUTH_TOKEN_COORDINATOR.get(id);
@@ -62,7 +56,7 @@ export function createHonoApp(): Hono<AppBindings> {
   app.post("/v1/repos/:repoId/branches/:branch/push/intent", async (context) => {
     const repoId = context.req.param("repoId");
     const branch = context.req.param("branch");
-    const input = pushIntentSchema.parse(await context.req.json());
+    const input = pushIntentRequestSchema.parse(await context.req.json());
     const id = context.env.REPO_BRANCH_COORDINATOR.idFromName(`${repoId}:${branch}`);
     const stub = context.env.REPO_BRANCH_COORDINATOR.get(id);
 
@@ -70,6 +64,30 @@ export function createHonoApp(): Hono<AppBindings> {
       method: "POST",
       body: JSON.stringify(input)
     });
+  });
+
+  app.post("/v1/service-accounts/authorize", async (context) => {
+    const input = serviceAccountAuthorizeRequestSchema.parse(await context.req.json());
+    const decision = authorizeServiceAccount({
+      token: {
+        status: input.status,
+        ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
+        ...(input.revokedAt ? { revokedAt: input.revokedAt } : {}),
+        allowedBranches: input.allowedBranches,
+        capabilities: input.capabilities
+      },
+      branchName: input.branchName,
+      operation: input.operation,
+      now: new Date(input.now)
+    });
+
+    return context.json(decision, { status: decision.allowed ? 200 : 403 });
+  });
+
+  app.post("/v1/envelopes/validate", async (context) => {
+    const input = envelopeValidationRequestSchema.parse(await context.req.json());
+    const result = validateEnvelopePayload(input.envelope);
+    return context.json(result, { status: result.valid ? 200 : 400 });
   });
 
   app.put("/v1/blobs/:commitId", async (context) => {
@@ -98,7 +116,7 @@ export function createHonoApp(): Hono<AppBindings> {
   });
 
   app.post("/v1/rotations", async (context) => {
-    const input = rotationSchema.parse(await context.req.json());
+    const input = rotationRequestSchema.parse(await context.req.json());
     const instance = await context.env.KEY_ROTATION_WORKFLOW.create({
       id: input.rotationId,
       params: input
@@ -113,20 +131,43 @@ export function createHonoApp(): Hono<AppBindings> {
       throw new HTTPException(500, { message: "GitHub webhook secret is not configured" });
     }
 
+    const payloadSha256 = await sha256TextHex(rawBody);
     const valid = await verifyGithubWebhookSignature({
       secret,
       rawBody,
       signatureHeader: context.req.header("X-Hub-Signature-256") ?? null
     });
 
-    if (!valid) {
-      throw new HTTPException(401, { message: "Invalid GitHub webhook signature" });
-    }
-
     const deliveryId = context.req.header("X-GitHub-Delivery");
     const event = context.req.header("X-GitHub-Event");
     if (!deliveryId || !event) {
       throw new HTTPException(400, { message: "GitHub delivery and event headers are required" });
+    }
+
+    const deliveryStub = context.env.GITHUB_DELIVERY_COORDINATOR.get(
+      context.env.GITHUB_DELIVERY_COORDINATOR.idFromName(deliveryId)
+    );
+    const receiptResponse = await deliveryStub.fetch("https://github-delivery-coordinator/record", {
+      method: "POST",
+      body: JSON.stringify({
+        deliveryId,
+        event,
+        receivedAt: new Date().toISOString(),
+        payloadSha256,
+        signatureValid: valid
+      })
+    });
+
+    if (!valid) {
+      return receiptResponse;
+    }
+
+    const receipt = (await receiptResponse.json()) as { readonly status: string };
+    if (receipt.status === "duplicate") {
+      return context.json({ queued: false, duplicate: true, deliveryId });
+    }
+    if (receipt.status === "delivery-replay") {
+      return context.json({ queued: false, reason: "delivery-replay", deliveryId }, 409);
     }
 
     await context.env.GITHUB_SYNC_QUEUE.send({
@@ -142,6 +183,16 @@ export function createHonoApp(): Hono<AppBindings> {
   app.notFound((context) => context.json({ error: "not-found" }, 404));
 
   app.onError((error, context) => {
+    if (error instanceof ZodError) {
+      return context.json(
+        {
+          error: "invalid-request",
+          message: error.issues.map((issue) => issue.message).join("; ")
+        },
+        400
+      );
+    }
+
     if (error instanceof HTTPException) {
       return error.getResponse();
     }
@@ -149,6 +200,11 @@ export function createHonoApp(): Hono<AppBindings> {
   });
 
   return app;
+}
+
+async function sha256TextHex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function sha256BytesHex(bytes: ArrayBuffer): Promise<string> {

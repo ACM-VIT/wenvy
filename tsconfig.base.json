@@ -16,6 +16,7 @@
     "noImplicitReturns": true,
     "noUncheckedIndexedAccess": true,
     "paths": {
+      "@wenvy/contracts": ["packages/contracts/src/contract-index.ts"],
       "@wenvy/domain": ["packages/domain/src/domain-index.ts"]
     },
     "resolveJsonModule": true,

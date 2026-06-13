@@ -1,0 +1,19 @@
+{
+  "name": "@wenvy/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/contract-index.d.ts",
+      "import": "./dist/contract-index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  }
+}

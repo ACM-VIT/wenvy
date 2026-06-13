@@ -1,12 +1,10 @@
+import { applyPushIntent, emptyBranchPushState, type BranchPushState } from "@wenvy/domain";
+
 interface WriteIntentInput {
   readonly expectedHead: string | null;
   readonly nextCommit: string;
   readonly idempotencyKey: string;
-}
-
-interface BranchState {
-  readonly headCommit: string | null;
-  readonly idempotencyResults: Record<string, string>;
+  readonly payloadFingerprint?: string;
 }
 
 export class RepoBranchCoordinator implements DurableObject {
@@ -25,48 +23,16 @@ export class RepoBranchCoordinator implements DurableObject {
 
     const input = (await request.json()) as WriteIntentInput;
     const state = await this.getBranchState();
+    const decision = applyPushIntent(state, input);
+    await this.ctx.storage.put("branch-state", decision.state);
 
-    const duplicateCommit = state.idempotencyResults[input.idempotencyKey];
-    if (duplicateCommit) {
-      return Response.json({
-        status: "duplicate",
-        headCommit: state.headCommit,
-        commit: duplicateCommit
-      });
-    }
-
-    if (state.headCommit !== input.expectedHead) {
-      return Response.json(
-        {
-          status: "conflict",
-          headCommit: state.headCommit
-        },
-        { status: 409 }
-      );
-    }
-
-    const nextState: BranchState = {
-      headCommit: input.nextCommit,
-      idempotencyResults: {
-        ...state.idempotencyResults,
-        [input.idempotencyKey]: input.nextCommit
-      }
-    };
-    await this.ctx.storage.put("branch-state", nextState);
-
-    return Response.json({
-      status: "accepted",
-      headCommit: nextState.headCommit,
-      commit: input.nextCommit
+    return Response.json(decision, {
+      status:
+        decision.status === "conflict" || decision.status === "idempotency-conflict" ? 409 : 200
     });
   }
 
-  private async getBranchState(): Promise<BranchState> {
-    return (
-      (await this.ctx.storage.get<BranchState>("branch-state")) ?? {
-        headCommit: null,
-        idempotencyResults: {}
-      }
-    );
+  private async getBranchState(): Promise<BranchPushState> {
+    return (await this.ctx.storage.get<BranchPushState>("branch-state")) ?? emptyBranchPushState;
   }
 }
