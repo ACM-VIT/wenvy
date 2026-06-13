@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { Koi } from './components/Koi'
+import { Logo } from './components/Logo'
 import { Masthead } from './components/Masthead'
 import { Reveal } from './components/Reveal'
 import { Terminal } from './components/Terminal'
@@ -186,7 +187,7 @@ MULTILINE_CERT=b64:LS0tLS1CRUdJTi...`}
       </section>
 
       <footer className="foot">
-        <span className="foot__mark">wenvy</span>
+        <span className="foot__mark"><Logo className="foot__logo" />wenvy</span>
         <span className="foot__team">Team LXVII · DevSpace 2026</span>
         <span className="foot__note">plaintext never leaves your device</span>
       </footer>

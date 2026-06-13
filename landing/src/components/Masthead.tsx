@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Logo } from './Logo'
 
 const LINKS: [string, string][] = [
   ['#problem', 'the problem'],
@@ -49,7 +50,7 @@ export function Masthead() {
       }}
     >
       <a className="mast__mark" href="#top" aria-label="Wenvy home">
-        wenvy<span className="mast__cursor" aria-hidden="true" />
+        <Logo className="mast__logo" />wenvy
       </a>
       <nav className="mast__nav" aria-label="Primary">
         {LINKS.map(([href, label]) => (
