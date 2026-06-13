@@ -99,8 +99,8 @@ code{ font-family:var(--f-mono); font-size:.92em; }
 /* ---------- koi ---------- */
 .koi{ position:absolute; z-index:0; fill:var(--ink); aspect-ratio:580 / 687; pointer-events:none; }
 .koi--tl{
-  width:clamp(104px,11vw,168px);
-  top:-46px; left:-46px; transform:rotate(-12deg);
+  width:clamp(100px,10vw,156px);
+  top:104px; left:-58px; transform:rotate(-12deg);
   animation:drift 14s ease-in-out infinite;
 }
 .koi--br{
