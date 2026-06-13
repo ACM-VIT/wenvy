@@ -374,6 +374,8 @@ Constraints:
 - Token scope can only be equal to or narrower than the service account's org scope.
 - Expired or revoked tokens are rejected at auth layer immediately.
 
+The current Worker data-plane migration stores service account and token identifiers as opaque text IDs and supports repo-scoped tokens first. Organization/team scope enforcement remains part of the full RBAC catalog rollout.
+
 ## `service_account_envelopes`
 Purpose: Team key envelopes encrypted for service account key material.
 

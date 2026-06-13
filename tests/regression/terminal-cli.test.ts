@@ -94,7 +94,9 @@ describe("terminal CLI regression", () => {
           "--idempotency-key",
           "idem_01JY7X0WENVYAAA",
           "--repo-key-version",
-          "7"
+          "7",
+          "--token",
+          "cli-test-token"
         ]
       );
 
@@ -117,7 +119,12 @@ describe("terminal CLI regression", () => {
         payloadFingerprint: ciphertextSha256
       });
       expect(receivedRequests[1]!.body).toEqual(ciphertext);
+      for (const request of receivedRequests) {
+        expect(request.headers.authorization).toBe("Bearer cli-test-token");
+      }
       expect(receivedRequests[1]!.headers["x-ciphertext-sha256"]).toBe(ciphertextSha256);
+      expect(receivedRequests[1]!.headers["x-wenvy-repo-id"]).toBe("repo_01JY7X0WENVYAAA");
+      expect(receivedRequests[1]!.headers["x-wenvy-branch"]).toBe("main");
       expect(JSON.parse(receivedRequests[2]!.body.toString("utf8"))).toMatchObject({
         expectedHead: null,
         commitId: "commit_01JY7X0WENVYAAA",
@@ -135,6 +142,29 @@ describe("terminal CLI regression", () => {
     } finally {
       await close(server);
     }
+  });
+
+  it("fails remote data-plane commands before network access when no token is configured", async () => {
+    const result = await runCli(
+      [
+        "exec",
+        "tsx",
+        cliPath,
+        "pull",
+        "--remote-url",
+        "http://127.0.0.1:9",
+        "--repo",
+        "repo_01JY7X0WENVYAAA",
+        "--branch",
+        "main"
+      ],
+      { WENVY_TOKEN: "" }
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("token is required");
+    expect(result.stderr).not.toContain("127.0.0.1");
   });
 });
 
@@ -226,10 +256,14 @@ interface CliProcessResult {
   readonly stderr: string;
 }
 
-async function runCli(args: readonly string[]): Promise<CliProcessResult> {
+async function runCli(args: readonly string[], env: Record<string, string> = {}): Promise<CliProcessResult> {
   return await new Promise<CliProcessResult>((resolve, reject) => {
     const child = spawn("pnpm", args, {
       cwd: process.cwd(),
+      env: {
+        ...process.env,
+        ...env
+      },
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";

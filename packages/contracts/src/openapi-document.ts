@@ -376,6 +376,24 @@ export const openApiDocument = {
         security: [{ bearerAuth: [] }],
         parameters: [
           {
+            name: "commitId",
+            in: "path",
+            required: true,
+            schema: { $ref: "#/components/schemas/OpaqueId" }
+          },
+          {
+            name: "x-wenvy-repo-id",
+            in: "header",
+            required: true,
+            schema: { $ref: "#/components/schemas/OpaqueId" }
+          },
+          {
+            name: "x-wenvy-branch",
+            in: "header",
+            required: true,
+            schema: { type: "string", minLength: 1 }
+          },
+          {
             name: "x-ciphertext-sha256",
             in: "header",
             required: true,

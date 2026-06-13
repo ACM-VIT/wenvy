@@ -68,6 +68,7 @@ program
   .requiredOption("--remote-url <url>")
   .requiredOption("--repo <repo>")
   .requiredOption("--branch <branch>")
+  .option("--token <token>")
   .option("--known-head <id-or-null>")
   .description("Pull latest encrypted snapshot metadata from the Worker data plane")
   .action(
@@ -75,14 +76,17 @@ program
       readonly remoteUrl: string;
       readonly repo: string;
       readonly branch: string;
+      readonly token?: string;
       readonly knownHead?: string;
     }) => {
+      const token = readAuthToken(options.token);
       const body: PullRequest = {
         knownHead: parseOptionalNullableCliValue(options.knownHead)
       };
       const response = await postJson(
         dataPlaneUrl(options.remoteUrl, "/v1/repos", options.repo, "branches", options.branch, "pull"),
-        body
+        body,
+        token
       );
       process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
     }
@@ -98,6 +102,7 @@ program
   .requiredOption("--commit-id <id>")
   .requiredOption("--idempotency-key <id>")
   .requiredOption("--repo-key-version <number>")
+  .option("--token <token>")
   .option("--parent-commit-id <id-or-null>")
   .description("Push encrypted snapshot bytes through Worker HTTPS routes")
   .action(
@@ -110,8 +115,10 @@ program
       readonly commitId: string;
       readonly idempotencyKey: string;
       readonly repoKeyVersion: string;
+      readonly token?: string;
       readonly parentCommitId?: string;
     }) => {
+      const token = readAuthToken(options.token);
       const ciphertext = await readFile(options.ciphertextFile);
       const ciphertextSha256 = sha256Hex(ciphertext);
       const expectedHead = parseRequiredNullableCliValue(options.expectedHead);
@@ -126,7 +133,8 @@ program
       };
       await postJson(
         dataPlaneUrl(options.remoteUrl, "/v1/repos", options.repo, "branches", options.branch, "push", "intent"),
-        intent
+        intent,
+        token
       );
 
       const blobResponse = await putBytes(
@@ -134,8 +142,11 @@ program
         ciphertext,
         {
           "content-type": "application/octet-stream",
-          "x-ciphertext-sha256": ciphertextSha256
-        }
+          "x-ciphertext-sha256": ciphertextSha256,
+          "x-wenvy-repo-id": options.repo,
+          "x-wenvy-branch": options.branch
+        },
+        token
       );
       const objectKey = readStringField(blobResponse, "objectKey");
 
@@ -152,7 +163,8 @@ program
       };
       const response = await postJson(
         dataPlaneUrl(options.remoteUrl, "/v1/repos", options.repo, "branches", options.branch, "push", "commit"),
-        commit
+        commit,
+        token
       );
 
       process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
@@ -219,21 +231,41 @@ function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-async function postJson(url: string, body: unknown): Promise<unknown> {
+function readAuthToken(cliToken: string | undefined): string {
+  const token = cliToken ?? process.env.WENVY_TOKEN;
+  if (!token) {
+    throw new Error("token is required; pass --token or set WENVY_TOKEN");
+  }
+  return token;
+}
+
+function authHeaders(token: string, headers: Record<string, string>): Record<string, string> {
+  return {
+    ...headers,
+    authorization: `Bearer ${token}`
+  };
+}
+
+async function postJson(url: string, body: unknown, token: string): Promise<unknown> {
   const response = await fetch(url, {
     method: "POST",
-    headers: {
+    headers: authHeaders(token, {
       "content-type": "application/json"
-    },
+    }),
     body: JSON.stringify(body)
   });
   return readJsonResponse(response);
 }
 
-async function putBytes(url: string, body: Uint8Array, headers: Record<string, string>): Promise<unknown> {
+async function putBytes(
+  url: string,
+  body: Uint8Array,
+  headers: Record<string, string>,
+  token: string
+): Promise<unknown> {
   const response = await fetch(url, {
     method: "PUT",
-    headers,
+    headers: authHeaders(token, headers),
     body: toArrayBuffer(body)
   });
   return readJsonResponse(response);

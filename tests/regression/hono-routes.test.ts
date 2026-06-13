@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createHonoApp } from "../../apps/web-worker/src/worker/hono-app.js";
+import type {
+  ServiceAccountTokenRecord,
+  ServiceAccountTokenRepository
+} from "../../apps/web-worker/src/worker/persistence/postgres/service-account-token-repository.js";
 import type { WorkerEnv } from "../../apps/web-worker/src/worker/worker-env.js";
+
+const serviceAccountId = "service_account_01JY7X0WENVYAAA";
+const bearerToken = "test-service-account-token";
 
 describe("Hono route regression", () => {
   it("serves OpenAPI document", async () => {
@@ -74,10 +81,15 @@ describe("Hono route regression", () => {
 
   it("rejects snapshot blob uploads whose declared hash does not match ciphertext bytes", async () => {
     const env = fakeEnv();
-    const response = await createHonoApp().fetch(
+    const response = await createHonoApp({
+      serviceAccountTokenRepository: fakeServiceAccountTokenRepository()
+    }).fetch(
       new Request("https://wenvy.test/v1/blobs/commit_01JY7X0WENVYAAA", {
         method: "PUT",
         headers: {
+          authorization: `Bearer ${bearerToken}`,
+          "x-wenvy-repo-id": "repo_01JY7X0WENVYAAA",
+          "x-wenvy-branch": "main",
           "x-ciphertext-sha256": "a".repeat(64)
         },
         body: "ciphertext"
@@ -94,10 +106,16 @@ describe("Hono route regression", () => {
     const env = fakeEnv();
     const bytes = "ciphertext";
     const digest = createHash("sha256").update(bytes).digest("hex");
-    const response = await createHonoApp().fetch(
+    const repository = fakeServiceAccountTokenRepository();
+    const response = await createHonoApp({
+      serviceAccountTokenRepository: repository
+    }).fetch(
       new Request("https://wenvy.test/v1/blobs/commit_01JY7X0WENVYAAA", {
         method: "PUT",
         headers: {
+          authorization: `Bearer ${bearerToken}`,
+          "x-wenvy-repo-id": "repo_01JY7X0WENVYAAA",
+          "x-wenvy-branch": "main",
           "x-ciphertext-sha256": digest
         },
         body: bytes
@@ -110,10 +128,12 @@ describe("Hono route regression", () => {
     expect(response.status).toBe(200);
     expect(body.objectKey).toMatch(/^snapshots\//u);
     expect(env.WENVY_BLOBS.put).toHaveBeenCalledOnce();
+    expect(repository.markLastUsed).toHaveBeenCalledOnce();
   });
 
-  it("forwards push intents with repo and branch scope", async () => {
+  it("requires bearer auth before forwarding push intents", async () => {
     const forwardedRequests: Request[] = [];
+    const repository = fakeServiceAccountTokenRepository();
     const env = fakeEnv({
       repoBranchFetch: async (request) => {
         forwardedRequests.push(request.clone());
@@ -121,9 +141,46 @@ describe("Hono route regression", () => {
       }
     });
 
-    const response = await createHonoApp().fetch(
+    const response = await createHonoApp({
+      serviceAccountTokenRepository: repository
+    }).fetch(
       new Request("https://wenvy.test/v1/repos/repo_01JY7X0WENVYAAA/branches/main/push/intent", {
         method: "POST",
+        body: JSON.stringify({
+          expectedHead: null,
+          nextCommit: "commit_01JY7X0WENVYAAA",
+          idempotencyKey: "idem_01JY7X0WENVYAAA",
+          payloadFingerprint: "a".repeat(64)
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({ error: "unauthorized" });
+    expect(forwardedRequests).toHaveLength(0);
+    expect(repository.findByTokenHash).not.toHaveBeenCalled();
+  });
+
+  it("forwards push intents with repo and branch scope", async () => {
+    const forwardedRequests: Request[] = [];
+    const repository = fakeServiceAccountTokenRepository();
+    const env = fakeEnv({
+      repoBranchFetch: async (request) => {
+        forwardedRequests.push(request.clone());
+        return Response.json({ status: "accepted", commit: "commit_01JY7X0WENVYAAA", headCommit: null });
+      }
+    });
+
+    const response = await createHonoApp({
+      serviceAccountTokenRepository: repository
+    }).fetch(
+      new Request("https://wenvy.test/v1/repos/repo_01JY7X0WENVYAAA/branches/main/push/intent", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${bearerToken}`
+        },
         body: JSON.stringify({
           expectedHead: null,
           nextCommit: "commit_01JY7X0WENVYAAA",
@@ -143,10 +200,57 @@ describe("Hono route regression", () => {
       branch: "main",
       nextCommit: "commit_01JY7X0WENVYAAA"
     });
+    expect(repository.markLastUsed).toHaveBeenCalledOnce();
+  });
+
+  it("denies push attempts from pull-only service account tokens before forwarding", async () => {
+    const forwardedRequests: Request[] = [];
+    const env = fakeEnv({
+      repoBranchFetch: async (request) => {
+        forwardedRequests.push(request.clone());
+        return Response.json({ status: "accepted", commit: "commit_01JY7X0WENVYAAA", headCommit: null });
+      }
+    });
+    const repository = fakeServiceAccountTokenRepository({ capabilities: "pull-only" });
+
+    const response = await createHonoApp({
+      serviceAccountTokenRepository: repository
+    }).fetch(
+      new Request("https://wenvy.test/v1/repos/repo_01JY7X0WENVYAAA/branches/main/push/intent", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${bearerToken}`
+        },
+        body: JSON.stringify({
+          expectedHead: null,
+          nextCommit: "commit_01JY7X0WENVYAAA",
+          idempotencyKey: "idem_01JY7X0WENVYAAA",
+          payloadFingerprint: "a".repeat(64)
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "forbidden", message: "capability-denied" });
+    expect(forwardedRequests).toHaveLength(0);
+    expect(repository.markLastUsed).not.toHaveBeenCalled();
+    expect(env.AUDIT_QUEUE.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "branch.push.intent",
+        actorType: "service-account",
+        actorServiceAccountId: serviceAccountId,
+        result: "denied",
+        targetId: "repo_01JY7X0WENVYAAA:main",
+        metadata: expect.objectContaining({ reason: "capability-denied" })
+      })
+    );
   });
 
   it("forwards validated push finalization to the branch coordinator", async () => {
     const forwardedRequests: Request[] = [];
+    const repository = fakeServiceAccountTokenRepository();
     const env = fakeEnv({
       repoBranchFetch: async (request) => {
         forwardedRequests.push(request.clone());
@@ -158,9 +262,14 @@ describe("Hono route regression", () => {
       }
     });
 
-    const response = await createHonoApp().fetch(
+    const response = await createHonoApp({
+      serviceAccountTokenRepository: repository
+    }).fetch(
       new Request("https://wenvy.test/v1/repos/repo_01JY7X0WENVYAAA/branches/main/push/commit", {
         method: "POST",
+        headers: {
+          authorization: `Bearer ${bearerToken}`
+        },
         body: JSON.stringify({
           expectedHead: null,
           commitId: "commit_01JY7X0WENVYAAA",
@@ -193,7 +302,8 @@ describe("Hono route regression", () => {
     expect(env.AUDIT_QUEUE.send).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "branch.push.committed",
-        actorType: "system",
+        actorType: "service-account",
+        actorServiceAccountId: serviceAccountId,
         result: "success",
         targetType: "repo-branch",
         targetId: "repo_01JY7X0WENVYAAA:main",
@@ -206,10 +316,12 @@ describe("Hono route regression", () => {
         })
       })
     );
+    expect(repository.markLastUsed).toHaveBeenCalledOnce();
   });
 
   it("forwards pull requests to the branch coordinator", async () => {
     const forwardedRequests: Request[] = [];
+    const repository = fakeServiceAccountTokenRepository();
     const env = fakeEnv({
       repoBranchFetch: async (request) => {
         forwardedRequests.push(request.clone());
@@ -217,9 +329,14 @@ describe("Hono route regression", () => {
       }
     });
 
-    const response = await createHonoApp().fetch(
+    const response = await createHonoApp({
+      serviceAccountTokenRepository: repository
+    }).fetch(
       new Request("https://wenvy.test/v1/repos/repo_01JY7X0WENVYAAA/branches/main/pull", {
         method: "POST",
+        headers: {
+          authorization: `Bearer ${bearerToken}`
+        },
         body: JSON.stringify({
           knownHead: "commit_01JY7X0WENVYAAA"
         })
@@ -236,6 +353,16 @@ describe("Hono route regression", () => {
       branch: "main",
       knownHead: "commit_01JY7X0WENVYAAA"
     });
+    expect(repository.markLastUsed).toHaveBeenCalledOnce();
+    expect(env.AUDIT_QUEUE.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "branch.pull",
+        actorType: "service-account",
+        actorServiceAccountId: serviceAccountId,
+        result: "success",
+        targetId: "repo_01JY7X0WENVYAAA:main"
+      })
+    );
   });
 
   it("queues rotation requests instead of starting workflows inline", async () => {
@@ -273,6 +400,25 @@ describe("Hono route regression", () => {
 
 interface FakeEnvOptions {
   readonly repoBranchFetch?: (request: Request) => Promise<Response>;
+}
+
+function fakeServiceAccountTokenRepository(
+  policyOverrides: Partial<ServiceAccountTokenRecord["policy"]> = {}
+): ServiceAccountTokenRepository {
+  return {
+    findByTokenHash: vi.fn(async () => ({
+      tokenId: "token_01JY7X0WENVYAAA",
+      serviceAccountId,
+      organizationId: "org_01JY7X0WENVYAAAA",
+      policy: {
+        status: "active",
+        allowedBranches: ["main"],
+        capabilities: "push-and-pull",
+        ...policyOverrides
+      }
+    })),
+    markLastUsed: vi.fn(async () => undefined)
+  };
 }
 
 function fakeEnv(options: FakeEnvOptions = {}): WorkerEnv {

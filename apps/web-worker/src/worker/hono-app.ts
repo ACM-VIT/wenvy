@@ -1,5 +1,7 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { ZodError } from "zod";
 import {
   consumeTokenRequestSchema,
@@ -15,16 +17,34 @@ import {
   authorizeServiceAccount,
   createSnapshotObjectKey,
   sha256Hex,
+  type ServiceAccountOperation,
   validateEnvelopePayload,
   verifyGithubWebhookSignature
 } from "@wenvy/domain";
+import {
+  createServiceAccountTokenRepository,
+  type ServiceAccountTokenRecord,
+  type ServiceAccountTokenRepository
+} from "./persistence/postgres/service-account-token-repository.js";
 import type { WorkerEnv } from "./worker-env.js";
 
 type AppBindings = {
   Bindings: WorkerEnv;
 };
 
-export function createHonoApp(): Hono<AppBindings> {
+type AppContext = Context<AppBindings>;
+
+interface HonoAppOptions {
+  readonly serviceAccountTokenRepository?: ServiceAccountTokenRepository;
+}
+
+interface AuthorizedServiceAccount {
+  readonly tokenId: string;
+  readonly serviceAccountId: string;
+  readonly organizationId: string | null;
+}
+
+export function createHonoApp(options: HonoAppOptions = {}): Hono<AppBindings> {
   const app = new Hono<AppBindings>();
 
   app.get("/health", (context) =>
@@ -58,6 +78,12 @@ export function createHonoApp(): Hono<AppBindings> {
   app.post("/v1/repos/:repoId/branches/:branch/push/intent", async (context) => {
     const repoId = context.req.param("repoId");
     const branch = context.req.param("branch");
+    await requireServiceAccountAuthorization(context, options, {
+      repoId,
+      branch,
+      operation: "push",
+      action: "branch.push.intent"
+    });
     const input = pushIntentRequestSchema.parse(await context.req.json());
     const id = context.env.REPO_BRANCH_COORDINATOR.idFromName(`${repoId}:${branch}`);
     const stub = context.env.REPO_BRANCH_COORDINATOR.get(id);
@@ -75,6 +101,12 @@ export function createHonoApp(): Hono<AppBindings> {
   app.post("/v1/repos/:repoId/branches/:branch/push/commit", async (context) => {
     const repoId = context.req.param("repoId");
     const branch = context.req.param("branch");
+    const actor = await requireServiceAccountAuthorization(context, options, {
+      repoId,
+      branch,
+      operation: "push",
+      action: "branch.push.commit"
+    });
     const input = pushCommitRequestSchema.parse(await context.req.json());
     const id = context.env.REPO_BRANCH_COORDINATOR.idFromName(`${repoId}:${branch}`);
     const stub = context.env.REPO_BRANCH_COORDINATOR.get(id);
@@ -106,7 +138,9 @@ export function createHonoApp(): Hono<AppBindings> {
       if (decision.status === "committed" && decision.commit) {
         await context.env.AUDIT_QUEUE.send({
           action: "branch.push.committed",
-          actorType: "system",
+          actorType: "service-account",
+          ...(actor.organizationId ? { organizationId: actor.organizationId } : {}),
+          actorServiceAccountId: actor.serviceAccountId,
           result: "success",
           targetType: "repo-branch",
           targetId: `${repoId}:${branch}`,
@@ -129,11 +163,17 @@ export function createHonoApp(): Hono<AppBindings> {
   app.post("/v1/repos/:repoId/branches/:branch/pull", async (context) => {
     const repoId = context.req.param("repoId");
     const branch = context.req.param("branch");
+    const actor = await requireServiceAccountAuthorization(context, options, {
+      repoId,
+      branch,
+      operation: "pull",
+      action: "branch.pull"
+    });
     const input = pullRequestSchema.parse(await context.req.json());
     const id = context.env.REPO_BRANCH_COORDINATOR.idFromName(`${repoId}:${branch}`);
     const stub = context.env.REPO_BRANCH_COORDINATOR.get(id);
 
-    return stub.fetch("https://repo-branch-coordinator/pull", {
+    const response = await stub.fetch("https://repo-branch-coordinator/pull", {
       method: "POST",
       body: JSON.stringify({
         repoId,
@@ -141,6 +181,24 @@ export function createHonoApp(): Hono<AppBindings> {
         ...input
       })
     });
+    if (response.ok) {
+      await context.env.AUDIT_QUEUE.send({
+        action: "branch.pull",
+        actorType: "service-account",
+        ...(actor.organizationId ? { organizationId: actor.organizationId } : {}),
+        actorServiceAccountId: actor.serviceAccountId,
+        result: "success",
+        targetType: "repo-branch",
+        targetId: `${repoId}:${branch}`,
+        metadata: {
+          repoId,
+          branch
+        },
+        occurredAt: new Date().toISOString()
+      });
+    }
+
+    return response;
   });
 
   app.post("/v1/service-accounts/authorize", async (context) => {
@@ -169,6 +227,17 @@ export function createHonoApp(): Hono<AppBindings> {
 
   app.put("/v1/blobs/:commitId", async (context) => {
     const commitId = context.req.param("commitId");
+    const repoId = context.req.header("x-wenvy-repo-id");
+    const branch = context.req.header("x-wenvy-branch");
+    if (!repoId || !branch) {
+      throw jsonHttpException(400, "invalid-request", "x-wenvy-repo-id and x-wenvy-branch are required");
+    }
+    await requireServiceAccountAuthorization(context, options, {
+      repoId,
+      branch,
+      operation: "push",
+      action: "blob.upload"
+    });
     const ciphertextSha256 = context.req.header("x-ciphertext-sha256");
     if (!ciphertextSha256) {
       throw new HTTPException(400, { message: "x-ciphertext-sha256 is required" });
@@ -277,6 +346,100 @@ export function createHonoApp(): Hono<AppBindings> {
   });
 
   return app;
+}
+
+async function requireServiceAccountAuthorization(
+  context: AppContext,
+  options: HonoAppOptions,
+  input: {
+    readonly repoId: string;
+    readonly branch: string;
+    readonly operation: Extract<ServiceAccountOperation, "pull" | "push">;
+    readonly action: string;
+  }
+): Promise<AuthorizedServiceAccount> {
+  const token = readBearerToken(context.req.header("Authorization"));
+  if (!token) {
+    throw jsonHttpException(401, "unauthorized", "bearer token is required");
+  }
+
+  const repository = options.serviceAccountTokenRepository ?? createServiceAccountTokenRepository(context.env);
+  const record = await repository.findByTokenHash({
+    tokenHash: await sha256Hex(token),
+    repoId: input.repoId
+  });
+  if (!record) {
+    throw jsonHttpException(401, "unauthorized", "bearer token is invalid");
+  }
+
+  const now = new Date();
+  const decision = authorizeServiceAccount({
+    token: record.policy,
+    branchName: input.branch,
+    operation: input.operation,
+    now
+  });
+  if (!decision.allowed) {
+    await auditDeniedServiceAccountAction(context, record, {
+      repoId: input.repoId,
+      branch: input.branch,
+      action: input.action,
+      reason: decision.reason
+    });
+    throw jsonHttpException(403, "forbidden", decision.reason);
+  }
+
+  await repository.markLastUsed({
+    tokenId: record.tokenId,
+    usedAt: now.toISOString()
+  });
+
+  return {
+    tokenId: record.tokenId,
+    serviceAccountId: record.serviceAccountId,
+    organizationId: record.organizationId
+  };
+}
+
+async function auditDeniedServiceAccountAction(
+  context: AppContext,
+  actor: ServiceAccountTokenRecord,
+  input: {
+    readonly repoId: string;
+    readonly branch: string;
+    readonly action: string;
+    readonly reason: string;
+  }
+): Promise<void> {
+  await context.env.AUDIT_QUEUE.send({
+    action: input.action,
+    actorType: "service-account",
+    ...(actor.organizationId ? { organizationId: actor.organizationId } : {}),
+    actorServiceAccountId: actor.serviceAccountId,
+    result: "denied",
+    targetType: "repo-branch",
+    targetId: `${input.repoId}:${input.branch}`,
+    metadata: {
+      repoId: input.repoId,
+      branch: input.branch,
+      reason: input.reason
+    },
+    occurredAt: new Date().toISOString()
+  });
+}
+
+function readBearerToken(header: string | undefined): string | null {
+  if (!header) {
+    return null;
+  }
+  const match = /^Bearer\s+(.+)$/iu.exec(header.trim());
+  return match?.[1] ?? null;
+}
+
+function jsonHttpException(status: ContentfulStatusCode, error: string, message: string): HTTPException {
+  return new HTTPException(status, {
+    res: Response.json({ error, message }, { status })
+  });
 }
 
 async function sha256TextHex(text: string): Promise<string> {
