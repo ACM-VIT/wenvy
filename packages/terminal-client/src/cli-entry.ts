@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { Command } from "commander";
 import type { PullRequest, PushCommitRequest, PushIntentRequest } from "@wenvy/contracts";
 import {
@@ -11,10 +12,106 @@ import {
   type BranchPolicy
 } from "@wenvy/domain";
 
+const cliVersion = "0.1.1";
+const defaultRemoteUrl = "https://api.wenvy.dev";
+const defaultBranch = "main";
+const configDirectoryName = ".wenvy";
+const configFileName = "config.json";
+
+interface WenvyProjectConfig {
+  readonly remoteUrl: string;
+  readonly repo: string;
+  readonly branch: string;
+}
+
+interface ConnectionOptions {
+  readonly remoteUrl?: string;
+  readonly repo?: string;
+  readonly branch?: string;
+  readonly token?: string;
+}
+
 const program = new Command()
   .name("wenvy")
   .description("TypeScript terminal client for Wenvy encrypted environment state")
-  .version("0.1.0");
+  .version(cliVersion)
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ wenvy init --repo repo_demo_01JY7X0WENVY
+  $ wenvy doctor
+  $ wenvy snapshot .env
+  $ wenvy push snapshot.enc
+  $ wenvy pull --output-file pulled.enc
+
+Run "wenvy demo" for a step-by-step demo script.
+`
+  );
+
+program
+  .command("init")
+  .description("Create a local .wenvy config for this project")
+  .option("--remote-url <url>", "Worker API URL", defaultRemoteUrl)
+  .option("--repo <repo>", "Wenvy repo ID")
+  .option("--branch <branch>", "Default branch", defaultBranch)
+  .option("--force", "Overwrite an existing .wenvy/config.json")
+  .action(
+    async (options: {
+      readonly remoteUrl: string;
+      readonly repo?: string;
+      readonly branch: string;
+      readonly force?: boolean;
+    }) => {
+      const config: WenvyProjectConfig = {
+        remoteUrl: normalizeRemoteUrl(options.remoteUrl),
+        repo: options.repo ?? "repo_demo_replace_me",
+        branch: options.branch
+      };
+      await writeProjectConfig(config, options.force === true);
+      process.stdout.write(formatInitOutput(config));
+    }
+  );
+
+program
+  .command("doctor")
+  .description("Check local config, token, and Worker API reachability")
+  .option("--remote-url <url>", "Worker API URL override")
+  .option("--repo <repo>", "Repo ID override")
+  .option("--branch <branch>", "Branch override")
+  .option("--token <token>", "Bearer token override")
+  .option("--skip-network", "Skip remote API health check")
+  .action(async (options: ConnectionOptions & { readonly skipNetwork?: boolean }) => {
+    const result = await runDoctor(options);
+    process.stdout.write(result.output);
+    if (!result.ok) {
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("demo")
+  .description("Print a step-by-step Wenvy demo script")
+  .action(async () => {
+    process.stdout.write(await formatDemoOutput());
+  });
+
+program
+  .command("snapshot")
+  .argument("<env-file>")
+  .description("Show canonical snapshot text and hash for a local env file")
+  .action(async (envFile: string) => {
+    const input = await readFile(envFile, "utf8");
+    const snapshot = await canonicalizeEnvSnapshot(input);
+    process.stdout.write("Wenvy snapshot\n\n");
+    process.stdout.write("Canonical env:\n");
+    process.stdout.write(snapshot.canonicalText);
+    process.stdout.write("\n");
+    process.stdout.write(`SHA-256: ${snapshot.sha256Hex}\n`);
+    process.stdout.write("\nNext:\n");
+    process.stdout.write("  Encrypt this canonical payload with your team key, then run:\n");
+    process.stdout.write("  wenvy push snapshot.enc\n");
+  });
 
 program
   .command("snapshot:canonicalize")
@@ -65,37 +162,45 @@ program
 
 program
   .command("pull")
-  .requiredOption("--remote-url <url>")
-  .requiredOption("--repo <repo>")
-  .requiredOption("--branch <branch>")
+  .option("--remote-url <url>")
+  .option("--repo <repo>")
+  .option("--branch <branch>")
   .option("--token <token>")
   .option("--known-head <id-or-null>")
   .option("--output-file <file>")
   .description("Pull latest encrypted snapshot metadata from the Worker data plane")
   .action(
     async (options: {
-      readonly remoteUrl: string;
-      readonly repo: string;
-      readonly branch: string;
+      readonly remoteUrl?: string;
+      readonly repo?: string;
+      readonly branch?: string;
       readonly token?: string;
       readonly knownHead?: string;
       readonly outputFile?: string;
     }) => {
-      const token = readAuthToken(options.token);
+      const connection = await resolveConnectionOptions(options);
       const body: PullRequest = {
         knownHead: parseOptionalNullableCliValue(options.knownHead)
       };
       const response = await postJson(
-        dataPlaneUrl(options.remoteUrl, "/v1/repos", options.repo, "branches", options.branch, "pull"),
+        dataPlaneUrl(connection.remoteUrl, "/v1/repos", connection.repo, "branches", connection.branch, "pull"),
         body,
-        token
+        connection.token
       );
       if (options.outputFile) {
         const snapshot = readSnapshotFromPullResponse(response);
         if (snapshot) {
           const ciphertext = await getBytes(
-            dataPlaneUrl(options.remoteUrl, "/v1/repos", options.repo, "branches", options.branch, "blobs", snapshot.commit),
-            token
+            dataPlaneUrl(
+              connection.remoteUrl,
+              "/v1/repos",
+              connection.repo,
+              "branches",
+              connection.branch,
+              "blobs",
+              snapshot.commit
+            ),
+            connection.token
           );
           const actualSha256 = sha256Hex(ciphertext);
           if (actualSha256 !== snapshot.ciphertextSha256 || ciphertext.byteLength !== snapshot.ciphertextSize) {
@@ -105,6 +210,60 @@ program
         }
       }
       process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
+    }
+  );
+
+program
+  .command("push")
+  .argument("<ciphertext-file>")
+  .description("Push an encrypted snapshot using .wenvy/config.json defaults")
+  .option("--remote-url <url>")
+  .option("--repo <repo>")
+  .option("--branch <branch>")
+  .option("--token <token>")
+  .option("--expected-head <id-or-null>", "Expected branch head", "null")
+  .option("--commit-id <id>", "Commit ID; generated when omitted")
+  .option("--idempotency-key <id>", "Idempotency key; generated when omitted")
+  .option("--parent-commit-id <id-or-null>")
+  .option("--repo-key-version <number>", "Repo key version", "1")
+  .option("--json", "Print raw JSON response")
+  .action(
+    async (
+      ciphertextFile: string,
+      options: ConnectionOptions & {
+        readonly expectedHead: string;
+        readonly commitId?: string;
+        readonly idempotencyKey?: string;
+        readonly parentCommitId?: string;
+        readonly repoKeyVersion: string;
+        readonly json?: boolean;
+      }
+    ) => {
+      const connection = await resolveConnectionOptions(options);
+      const commitId = options.commitId ?? generateOpaqueId("commit");
+      const idempotencyKey = options.idempotencyKey ?? generateOpaqueId("idem");
+      const response = await pushCiphertext({
+        ...connection,
+        ciphertextFile,
+        expectedHead: options.expectedHead,
+        commitId,
+        idempotencyKey,
+        repoKeyVersion: options.repoKeyVersion,
+        ...(options.parentCommitId ? { parentCommitId: options.parentCommitId } : {})
+      });
+
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
+        return;
+      }
+
+      const headCommit = readOptionalStringField(response, "headCommit") ?? commitId;
+      process.stdout.write("Wenvy push complete\n\n");
+      process.stdout.write(`Repo:   ${connection.repo}\n`);
+      process.stdout.write(`Branch: ${connection.branch}\n`);
+      process.stdout.write(`Commit: ${headCommit}\n`);
+      process.stdout.write("\nNext:\n");
+      process.stdout.write("  wenvy pull --output-file pulled.enc\n");
     }
   );
 
@@ -134,65 +293,336 @@ program
       readonly token?: string;
       readonly parentCommitId?: string;
     }) => {
-      const token = readAuthToken(options.token);
-      const ciphertext = await readFile(options.ciphertextFile);
-      const ciphertextSha256 = sha256Hex(ciphertext);
-      const expectedHead = parseRequiredNullableCliValue(options.expectedHead);
-      const parentCommitId = parseOptionalNullableCliValue(options.parentCommitId) ?? expectedHead;
-      const repoKeyVersion = parsePositiveInteger(options.repoKeyVersion, "repo-key-version");
-
-      const intent: PushIntentRequest = {
-        expectedHead,
-        nextCommit: options.commitId,
-        idempotencyKey: options.idempotencyKey,
-        payloadFingerprint: ciphertextSha256
-      };
-      await postJson(
-        dataPlaneUrl(options.remoteUrl, "/v1/repos", options.repo, "branches", options.branch, "push", "intent"),
-        intent,
-        token
-      );
-
-      const blobResponse = await putBytes(
-        dataPlaneUrl(options.remoteUrl, "/v1/blobs", options.commitId),
-        ciphertext,
-        {
-          "content-type": "application/octet-stream",
-          "x-ciphertext-sha256": ciphertextSha256,
-          "x-wenvy-repo-id": options.repo,
-          "x-wenvy-branch": options.branch
-        },
-        token
-      );
-      const objectKey = readStringField(blobResponse, "objectKey");
-
-      const commit: PushCommitRequest = {
-        expectedHead,
+      const response = await pushCiphertext({
+        remoteUrl: options.remoteUrl,
+        repo: options.repo,
+        branch: options.branch,
+        token: readAuthToken(options.token),
+        ciphertextFile: options.ciphertextFile,
+        expectedHead: options.expectedHead,
         commitId: options.commitId,
-        parentCommitId,
         idempotencyKey: options.idempotencyKey,
-        payloadFingerprint: ciphertextSha256,
-        objectKey,
-        ciphertextSha256,
-        ciphertextSize: ciphertext.byteLength,
-        repoKeyVersion
-      };
-      const response = await postJson(
-        dataPlaneUrl(options.remoteUrl, "/v1/repos", options.repo, "branches", options.branch, "push", "commit"),
-        commit,
-        token
-      );
-
+        repoKeyVersion: options.repoKeyVersion,
+        ...(options.parentCommitId ? { parentCommitId: options.parentCommitId } : {})
+      });
       process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
     }
   );
 
 try {
-  await program.parseAsync();
+  if (process.argv.length <= 2) {
+    process.stdout.write(formatBanner());
+  } else {
+    await program.parseAsync();
+  }
 } catch (error) {
   const message = error instanceof Error ? error.message : "unknown error";
   process.stderr.write(`error: ${redactCliError(message)}\n`);
   process.exitCode = 1;
+}
+
+function formatBanner(): string {
+  return [
+    "",
+    "wenvy",
+    "TypeScript encrypted environment state on Cloudflare.",
+    "",
+    "  $ wenvy init --repo <repo-id>      Create .wenvy/config.json",
+    "  $ wenvy doctor                     Check config, token, and API health",
+    "  $ wenvy snapshot .env              Canonicalize and hash a local env file",
+    "  $ wenvy push snapshot.enc          Push encrypted snapshot bytes",
+    "  $ wenvy pull --output-file out.enc Pull encrypted snapshot bytes",
+    "",
+    "Try: wenvy demo",
+    ""
+  ].join("\n");
+}
+
+function formatInitOutput(config: WenvyProjectConfig): string {
+  const repoLine =
+    config.repo === "repo_demo_replace_me"
+      ? "  1. Edit .wenvy/config.json and replace repo_demo_replace_me"
+      : "  1. Export a service account token";
+  const tokenLine =
+    config.repo === "repo_demo_replace_me"
+      ? "  2. Export a service account token: export WENVY_TOKEN=<token>"
+      : "     export WENVY_TOKEN=<token>";
+  const doctorLine = config.repo === "repo_demo_replace_me" ? "  3. Run: wenvy doctor" : "  2. Run: wenvy doctor";
+  const demoLine = config.repo === "repo_demo_replace_me" ? "  4. Run: wenvy demo" : "  3. Run: wenvy demo";
+
+  return [
+    "Initialized Wenvy project",
+    "",
+    "Created:",
+    "  .wenvy/config.json",
+    "  .wenvy/.gitignore",
+    "",
+    "Config:",
+    `  remoteUrl: ${config.remoteUrl}`,
+    `  repo:      ${config.repo}`,
+    `  branch:    ${config.branch}`,
+    "",
+    "Next steps:",
+    repoLine,
+    tokenLine,
+    doctorLine,
+    demoLine,
+    ""
+  ].join("\n");
+}
+
+async function formatDemoOutput(): Promise<string> {
+  const config = await readProjectConfig();
+  const repo = config?.repo && config.repo !== "repo_demo_replace_me" ? config.repo : "<repo-id>";
+  const branch = config?.branch ?? defaultBranch;
+  const remoteUrl = config?.remoteUrl ?? defaultRemoteUrl;
+  return [
+    "Wenvy demo path",
+    "",
+    "1. Install the CLI",
+    "   npm install -g wenvy",
+    "",
+    "2. Initialize project defaults",
+    `   wenvy init --repo ${repo} --branch ${branch}`,
+    "",
+    "3. Export a service account token",
+    "   export WENVY_TOKEN=<token>",
+    "",
+    "4. Verify local config and the live Worker",
+    "   wenvy doctor",
+    "",
+    "5. Show local env canonicalization",
+    "   printf 'B=two\\nA=one\\n' > demo.env",
+    "   wenvy snapshot demo.env",
+    "",
+    "6. Push encrypted snapshot bytes",
+    "   printf 'sealed-demo-bytes' > snapshot.enc",
+    "   wenvy push snapshot.enc",
+    "",
+    "7. Pull the latest encrypted snapshot",
+    "   wenvy pull --output-file pulled.enc",
+    "",
+    "Live endpoints:",
+    `   ${remoteUrl}/health`,
+    `   ${remoteUrl}/openapi.json`,
+    ""
+  ].join("\n");
+}
+
+async function writeProjectConfig(config: WenvyProjectConfig, force: boolean): Promise<void> {
+  const directory = configDirectoryPath();
+  const path = projectConfigPath();
+  if (!force && (await fileExists(path))) {
+    throw new Error(".wenvy/config.json already exists; rerun with --force to overwrite it");
+  }
+  await mkdir(directory, { recursive: true });
+  await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  await writeFile(join(directory, ".gitignore"), ["cache/", "snapshots/", "*.local.json", "*.token", ""].join("\n"), "utf8");
+}
+
+async function runDoctor(options: ConnectionOptions & { readonly skipNetwork?: boolean }): Promise<{
+  readonly ok: boolean;
+  readonly output: string;
+}> {
+  const lines = ["Wenvy doctor", ""];
+  let ok = true;
+  const config = await readProjectConfig();
+  const token = options.token ?? process.env.WENVY_TOKEN;
+
+  if (config) {
+    lines.push(`[ok] config found: ${projectConfigPath()}`);
+  } else {
+    ok = false;
+    lines.push("[fail] config missing: run wenvy init --repo <repo-id>");
+  }
+
+  const remoteUrl = normalizeRemoteUrl(options.remoteUrl ?? config?.remoteUrl ?? defaultRemoteUrl);
+  const repo = options.repo ?? config?.repo;
+  const branch = options.branch ?? config?.branch ?? defaultBranch;
+
+  if (repo && repo !== "repo_demo_replace_me") {
+    lines.push(`[ok] repo: ${repo}`);
+  } else {
+    ok = false;
+    lines.push("[fail] repo missing: pass --repo or edit .wenvy/config.json");
+  }
+  lines.push(`[ok] branch: ${branch}`);
+
+  if (token) {
+    lines.push("[ok] token: WENVY_TOKEN is set");
+  } else {
+    ok = false;
+    lines.push("[fail] token missing: export WENVY_TOKEN=<token>");
+  }
+
+  if (options.skipNetwork === true) {
+    lines.push("[skip] remote health: skipped by --skip-network");
+  } else {
+    const health = await fetchHealth(remoteUrl);
+    if (health.ok) {
+      lines.push(`[ok] remote health: ${remoteUrl}/health`);
+    } else {
+      ok = false;
+      lines.push(`[fail] remote health: ${health.reason}`);
+    }
+  }
+
+  lines.push("");
+  lines.push(ok ? "Ready." : "Not ready yet. Fix the failed checks above, then rerun wenvy doctor.");
+  lines.push("");
+  return { ok, output: lines.join("\n") };
+}
+
+async function fetchHealth(remoteUrl: string): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }> {
+  try {
+    const response = await fetch(`${remoteUrl}/health`);
+    if (!response.ok) {
+      return { ok: false, reason: `${remoteUrl}/health returned HTTP ${response.status}` };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : "unknown network error" };
+  }
+}
+
+async function resolveConnectionOptions(options: ConnectionOptions): Promise<{
+  readonly remoteUrl: string;
+  readonly repo: string;
+  readonly branch: string;
+  readonly token: string;
+}> {
+  const config = await readProjectConfig();
+  const remoteUrl = normalizeRemoteUrl(options.remoteUrl ?? config?.remoteUrl ?? defaultRemoteUrl);
+  const repo = options.repo ?? config?.repo;
+  const branch = options.branch ?? config?.branch ?? defaultBranch;
+
+  if (!repo || repo === "repo_demo_replace_me") {
+    throw new Error("repo is required; run wenvy init --repo <repo-id> or pass --repo");
+  }
+
+  return {
+    remoteUrl,
+    repo,
+    branch,
+    token: readAuthToken(options.token)
+  };
+}
+
+async function readProjectConfig(): Promise<WenvyProjectConfig | undefined> {
+  const path = projectConfigPath();
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch (error) {
+    if (typeof error === "object" && error && "code" in error && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+
+  const parsed = JSON.parse(text) as unknown;
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error(".wenvy/config.json must contain an object");
+  }
+  const record = parsed as Record<string, unknown>;
+  const remoteUrl = record.remoteUrl;
+  const repo = record.repo;
+  const branch = record.branch;
+  if (typeof remoteUrl !== "string" || typeof repo !== "string" || typeof branch !== "string") {
+    throw new Error(".wenvy/config.json must include remoteUrl, repo, and branch strings");
+  }
+  return { remoteUrl, repo, branch };
+}
+
+function projectRoot(): string {
+  return process.env.WENVY_PROJECT_DIR ?? process.cwd();
+}
+
+function configDirectoryPath(): string {
+  return join(projectRoot(), configDirectoryName);
+}
+
+function projectConfigPath(): string {
+  return join(configDirectoryPath(), configFileName);
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await readFile(path);
+    return true;
+  } catch (error) {
+    if (typeof error === "object" && error && "code" in error && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function generateOpaqueId(prefix: string): string {
+  return `${prefix}_${randomBytes(12).toString("hex")}`;
+}
+
+interface PushCiphertextInput {
+  readonly remoteUrl: string;
+  readonly repo: string;
+  readonly branch: string;
+  readonly ciphertextFile: string;
+  readonly expectedHead: string;
+  readonly commitId: string;
+  readonly idempotencyKey: string;
+  readonly repoKeyVersion: string;
+  readonly token: string;
+  readonly parentCommitId?: string;
+}
+
+async function pushCiphertext(input: PushCiphertextInput): Promise<unknown> {
+  const ciphertext = await readFile(input.ciphertextFile);
+  const ciphertextSha256 = sha256Hex(ciphertext);
+  const expectedHead = parseRequiredNullableCliValue(input.expectedHead);
+  const parentCommitId = parseOptionalNullableCliValue(input.parentCommitId) ?? expectedHead;
+  const repoKeyVersion = parsePositiveInteger(input.repoKeyVersion, "repo-key-version");
+
+  const intent: PushIntentRequest = {
+    expectedHead,
+    nextCommit: input.commitId,
+    idempotencyKey: input.idempotencyKey,
+    payloadFingerprint: ciphertextSha256
+  };
+  await postJson(
+    dataPlaneUrl(input.remoteUrl, "/v1/repos", input.repo, "branches", input.branch, "push", "intent"),
+    intent,
+    input.token
+  );
+
+  const blobResponse = await putBytes(
+    dataPlaneUrl(input.remoteUrl, "/v1/blobs", input.commitId),
+    ciphertext,
+    {
+      "content-type": "application/octet-stream",
+      "x-ciphertext-sha256": ciphertextSha256,
+      "x-wenvy-repo-id": input.repo,
+      "x-wenvy-branch": input.branch
+    },
+    input.token
+  );
+  const objectKey = readStringField(blobResponse, "objectKey");
+
+  const commit: PushCommitRequest = {
+    expectedHead,
+    commitId: input.commitId,
+    parentCommitId,
+    idempotencyKey: input.idempotencyKey,
+    payloadFingerprint: ciphertextSha256,
+    objectKey,
+    ciphertextSha256,
+    ciphertextSize: ciphertext.byteLength,
+    repoKeyVersion
+  };
+  return await postJson(
+    dataPlaneUrl(input.remoteUrl, "/v1/repos", input.repo, "branches", input.branch, "push", "commit"),
+    commit,
+    input.token
+  );
 }
 
 function redactCliError(message: string): string {
@@ -309,6 +739,14 @@ function readStringField(payload: unknown, field: string): string {
     throw new Error(`response field ${field} must be a string`);
   }
   return value;
+}
+
+function readOptionalStringField(payload: unknown, field: string): string | undefined {
+  if (!payload || typeof payload !== "object" || !(field in payload)) {
+    return undefined;
+  }
+  const value = payload[field as keyof typeof payload];
+  return typeof value === "string" ? value : undefined;
 }
 
 interface PullSnapshot {

@@ -10,6 +10,70 @@ import { describe, expect, it } from "vitest";
 const cliPath = "packages/terminal-client/src/cli-entry.ts";
 
 describe("terminal CLI regression", () => {
+  it("prints a stepwise developer banner when run without arguments", () => {
+    const result = spawnSync("pnpm", ["exec", "tsx", cliPath], {
+      cwd: process.cwd(),
+      encoding: "utf8"
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("wenvy");
+    expect(result.stdout).toContain("wenvy init --repo <repo-id>");
+    expect(result.stdout).toContain("wenvy doctor");
+    expect(result.stdout).toContain("wenvy demo");
+  });
+
+  it("initializes project config with explicit repo and branch defaults", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wenvy-cli-"));
+
+    const result = spawnSync(
+      "pnpm",
+      ["exec", "tsx", cliPath, "init", "--repo", "repo_01JY7X0WENVYAAA", "--branch", "main"],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          WENVY_PROJECT_DIR: dir
+        }
+      }
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Initialized Wenvy project");
+    expect(result.stdout).toContain(".wenvy/config.json");
+    expect(JSON.parse(await readFile(join(dir, ".wenvy", "config.json"), "utf8"))).toEqual({
+      remoteUrl: "https://api.wenvy.dev",
+      repo: "repo_01JY7X0WENVYAAA",
+      branch: "main"
+    });
+    expect(await readFile(join(dir, ".wenvy", ".gitignore"), "utf8")).toContain("*.token");
+  });
+
+  it("checks project readiness without requiring network when skipped", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wenvy-cli-"));
+    await spawnInitForProjectDir(dir);
+
+    const result = spawnSync("pnpm", ["exec", "tsx", cliPath, "doctor", "--skip-network"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        WENVY_PROJECT_DIR: dir,
+        WENVY_TOKEN: "cli-test-token"
+      }
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("[ok] config found");
+    expect(result.stdout).toContain("[ok] token: WENVY_TOKEN is set");
+    expect(result.stdout).toContain("[skip] remote health");
+    expect(result.stdout).toContain("Ready.");
+  });
+
   it("prints canonical snapshot bytes without extra terminal output", async () => {
     const dir = await mkdtemp(join(tmpdir(), "wenvy-cli-"));
     const envFile = join(dir, ".env");
@@ -38,6 +102,88 @@ describe("terminal CLI regression", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toBe("7819c04858487b8325a083235e0697f271991cb446086084807fec586dc27427\n");
     expect(result.stderr).toBe("");
+  });
+
+  it("prints a guided snapshot summary for the friendly snapshot command", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wenvy-cli-"));
+    const envFile = join(dir, ".env");
+    await writeFile(envFile, "B=two\nA=one\n", "utf8");
+
+    const result = spawnSync("pnpm", ["exec", "tsx", cliPath, "snapshot", envFile], {
+      cwd: process.cwd(),
+      encoding: "utf8"
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Wenvy snapshot");
+    expect(result.stdout).toContain("A=one\nB=two\n");
+    expect(result.stdout).toContain("SHA-256:");
+    expect(result.stdout).toContain("wenvy push snapshot.enc");
+  });
+
+  it("pushes ciphertext through the friendly push command using project config defaults", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wenvy-cli-"));
+    const ciphertextFile = join(dir, "snapshot.bin");
+    const ciphertext = Buffer.from("sealed-ciphertext-bytes");
+    await writeFile(ciphertextFile, ciphertext);
+    await spawnInitForProjectDir(dir);
+
+    const receivedRequests: ReceivedRequest[] = [];
+    const server = createServer(async (request, response) => {
+      await handleCliPushRequest(request, response, receivedRequests);
+    });
+    await listen(server);
+
+    try {
+      const address = server.address() as AddressInfo;
+      await writeFile(
+        join(dir, ".wenvy", "config.json"),
+        JSON.stringify(
+          {
+            remoteUrl: `http://127.0.0.1:${address.port}`,
+            repo: "repo_01JY7X0WENVYAAA",
+            branch: "main"
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      const result = await runCli(
+        [
+          "exec",
+          "tsx",
+          cliPath,
+          "push",
+          ciphertextFile,
+          "--commit-id",
+          "commit_01JY7X0WENVYAAA",
+          "--idempotency-key",
+          "idem_01JY7X0WENVYAAA",
+          "--repo-key-version",
+          "7"
+        ],
+        {
+          WENVY_PROJECT_DIR: dir,
+          WENVY_TOKEN: "cli-test-token"
+        }
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("Wenvy push complete");
+      expect(result.stdout).toContain("Repo:   repo_01JY7X0WENVYAAA");
+      expect(result.stdout).toContain("wenvy pull --output-file pulled.enc");
+      expect(receivedRequests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        "POST /v1/repos/repo_01JY7X0WENVYAAA/branches/main/push/intent",
+        "PUT /v1/blobs/commit_01JY7X0WENVYAAA",
+        "POST /v1/repos/repo_01JY7X0WENVYAAA/branches/main/push/commit"
+      ]);
+    } finally {
+      await close(server);
+    }
   });
 
   it("exits nonzero for invalid CLI input without leaking env contents or stack traces", async () => {
@@ -181,23 +327,30 @@ describe("terminal CLI regression", () => {
 
     try {
       const address = server.address() as AddressInfo;
-      const remoteUrl = `http://127.0.0.1:${address.port}`;
+      await spawnInitForProjectDir(dir);
+      await writeFile(
+        join(dir, ".wenvy", "config.json"),
+        JSON.stringify(
+          {
+            remoteUrl: `http://127.0.0.1:${address.port}`,
+            repo: "repo_01JY7X0WENVYAAA",
+            branch: "main"
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
       const result = await runCli([
         "exec",
         "tsx",
         cliPath,
         "pull",
-        "--remote-url",
-        remoteUrl,
-        "--repo",
-        "repo_01JY7X0WENVYAAA",
-        "--branch",
-        "main",
         "--token",
         "cli-test-token",
         "--output-file",
         outputFile
-      ]);
+      ], { WENVY_PROJECT_DIR: dir });
 
       expect(result.status).toBe(0);
       expect(result.stderr).toBe("");
@@ -225,6 +378,20 @@ describe("terminal CLI regression", () => {
     }
   });
 });
+
+async function spawnInitForProjectDir(dir: string): Promise<void> {
+  const result = spawnSync("pnpm", ["exec", "tsx", cliPath, "init", "--repo", "repo_01JY7X0WENVYAAA"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      WENVY_PROJECT_DIR: dir
+    }
+  });
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || "wenvy init failed");
+  }
+}
 
 interface ReceivedRequest {
   readonly method: string;

@@ -21,6 +21,36 @@ pnpm landing:dev
 pnpm cloudflare:plan
 ```
 
+## Demo Quickstart
+
+```bash
+npm install -g wenvy
+wenvy init --repo <repo-id> --branch main
+export WENVY_TOKEN=<service-account-token>
+wenvy doctor
+```
+
+Show local env normalization:
+
+```bash
+printf 'B=two\nA=one\n' > demo.env
+wenvy snapshot demo.env
+```
+
+Push and pull encrypted snapshot bytes:
+
+```bash
+printf 'sealed-demo-bytes' > snapshot.enc
+wenvy push snapshot.enc
+wenvy pull --output-file pulled.enc
+```
+
+For a narrated command list:
+
+```bash
+wenvy demo
+```
+
 `pnpm cloudflare:plan` reads the active Cloudflare account/zone from the `cf` CLI and prints the Wrangler initialization commands. To apply them, authenticate Wrangler or provide `CLOUDFLARE_API_TOKEN`, then run:
 
 ```bash

@@ -28,6 +28,56 @@ describe("Hono route regression", () => {
     expect(body.openapi).toBe("3.1.0");
   });
 
+  it("allows the dashboard origin to read API health from the browser", async () => {
+    const response = await createHonoApp().fetch(
+      new Request("https://wenvy.test/health", {
+        headers: {
+          origin: "https://dash.wenvy.dev"
+        }
+      }),
+      fakeEnv(),
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://dash.wenvy.dev");
+  });
+
+  it("answers dashboard CORS preflight for authenticated data-plane routes", async () => {
+    const response = await createHonoApp().fetch(
+      new Request("https://wenvy.test/v1/repos/repo_01JY7X0WENVYAAA/branches/main/pull", {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://dash.wenvy.dev",
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "authorization,content-type"
+        }
+      }),
+      fakeEnv(),
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://dash.wenvy.dev");
+    expect(response.headers.get("access-control-allow-methods")).toContain("POST");
+    expect(response.headers.get("access-control-allow-headers")).toContain("authorization");
+  });
+
+  it("does not grant browser CORS to unrelated origins", async () => {
+    const response = await createHonoApp().fetch(
+      new Request("https://wenvy.test/health", {
+        headers: {
+          origin: "https://example.invalid"
+        }
+      }),
+      fakeEnv(),
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
   it("returns 400 for invalid contract payloads instead of internal-error", async () => {
     const response = await createHonoApp().fetch(
       new Request("https://wenvy.test/v1/service-accounts/authorize", {

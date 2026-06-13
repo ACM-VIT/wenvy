@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { ZodError } from "zod";
@@ -56,6 +57,28 @@ interface SnapshotCommit {
 
 export function createHonoApp(options: HonoAppOptions = {}): Hono<AppBindings> {
   const app = new Hono<AppBindings>();
+
+  app.use(
+    "*",
+    cors({
+      origin: isAllowedDashboardOrigin,
+      allowMethods: ["GET", "POST", "PUT", "OPTIONS"],
+      allowHeaders: [
+        "authorization",
+        "content-type",
+        "x-ciphertext-sha256",
+        "x-wenvy-branch",
+        "x-wenvy-repo-id"
+      ],
+      exposeHeaders: [
+        "x-ciphertext-sha256",
+        "x-ciphertext-size",
+        "x-repo-key-version",
+        "x-wenvy-commit-id"
+      ],
+      maxAge: 86400
+    })
+  );
 
   app.get("/health", (context) =>
     context.json({
@@ -403,6 +426,19 @@ export function createHonoApp(options: HonoAppOptions = {}): Hono<AppBindings> {
   });
 
   return app;
+}
+
+function isAllowedDashboardOrigin(origin: string): string | undefined {
+  if (
+    origin === "https://dash.wenvy.dev" ||
+    origin === "https://wenvy.dev" ||
+    origin === "https://www.wenvy.dev" ||
+    origin === "http://127.0.0.1:4322" ||
+    origin === "http://localhost:4322"
+  ) {
+    return origin;
+  }
+  return undefined;
 }
 
 async function requireServiceAccountAuthorization(
