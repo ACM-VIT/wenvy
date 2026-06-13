@@ -5,15 +5,19 @@ type Seg = readonly [string, string]
 
 // [text, className]  ·  className '' renders as plain text
 const SCRIPT: Seg[] = [
-  ['$ ', 'dim'], ['wenvy push ', 'p'], ['api-keys production\n', 'hl'],
-  ['  resolving envelope chain  ssh → team → repo …\n', 'dim'],
+  ['$ ', 'dim'], ['wenvy push ', 'p'], ['api-keys production ', 'hl'], ['--api https://api.wenvy.dev\n', 'dim'],
+  ['  resolving envelope chain  ssh key → team → repo …\n', 'dim'],
   ['  canonicalizing ', ''], ['14 keys', 'hl'], ['  sha256 ', 'dim'], ['9f2c4e…a17b\n', 'p'],
   ['  sealing snapshot  ', ''], ['XChaCha20-Poly1305', 'hl'], ['  (repo key v3)\n', 'dim'],
-  ['  streaming ciphertext → ', ''], ['ssh.wenvy.dev', 'p'], ['\n', ''],
+  ['  POST ', 'dim'], ['/v1/repos/.../push/intent', 'p'], ['  write lock granted\n', 'dim'],
+  ['  PUT  ', 'dim'], ['/v1/blobs/commit_4e9a', 'p'], ['  ciphertext only\n', 'dim'],
+  ['  POST ', 'dim'], ['/v1/repos/.../push/commit\n', 'p'],
   ['  branch policy  ', 'dim'], ['production', 'hl'], [': admin write · approval ✓\n', 'dim'],
   ['✓ ', 'ok'], ['production', 'hl'], [' ← commit ', ''], ['4e9a', 'p'],
   ['  signed ed25519 a1:b2:…\n', 'dim'],
   ['\n$ ', 'dim'], ['wenvy pull ', 'p'], ['api-keys dev\n', 'hl'],
+  ['  POST ', 'dim'], ['/v1/repos/.../pull', 'p'], ['  current head + blob ref\n', 'dim'],
+  ['  GET  ', 'dim'], ['/v1/repos/.../blobs/commit_4e9a\n', 'p'],
   ['✓ ', 'ok'], ['decrypted locally · ', ''], ['plaintext never touched the server', 'hl'], ['\n', ''],
 ]
 
@@ -58,7 +62,7 @@ export function Terminal() {
 
   return (
     <div className="term" ref={host} role="img" aria-label="Terminal demonstration of wenvy push">
-      <div className="term__bar"><span /><span /><span /><b>ssh.wenvy.dev</b></div>
+      <div className="term__bar"><span /><span /><span /><b>api.wenvy.dev</b></div>
       <pre className="term__body">
         {segs.map(([t, c], i) => (c ? <span key={i} className={c}>{t}</span> : <span key={i}>{t}</span>))}
         <span className="term__caret" />

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { Command } from "commander";
 import type { PullRequest, PushCommitRequest, PushIntentRequest } from "@wenvy/contracts";
 import {
@@ -70,6 +70,7 @@ program
   .requiredOption("--branch <branch>")
   .option("--token <token>")
   .option("--known-head <id-or-null>")
+  .option("--output-file <file>")
   .description("Pull latest encrypted snapshot metadata from the Worker data plane")
   .action(
     async (options: {
@@ -78,6 +79,7 @@ program
       readonly branch: string;
       readonly token?: string;
       readonly knownHead?: string;
+      readonly outputFile?: string;
     }) => {
       const token = readAuthToken(options.token);
       const body: PullRequest = {
@@ -88,6 +90,20 @@ program
         body,
         token
       );
+      if (options.outputFile) {
+        const snapshot = readSnapshotFromPullResponse(response);
+        if (snapshot) {
+          const ciphertext = await getBytes(
+            dataPlaneUrl(options.remoteUrl, "/v1/repos", options.repo, "branches", options.branch, "blobs", snapshot.commit),
+            token
+          );
+          const actualSha256 = sha256Hex(ciphertext);
+          if (actualSha256 !== snapshot.ciphertextSha256 || ciphertext.byteLength !== snapshot.ciphertextSize) {
+            throw new Error("downloaded ciphertext does not match pull metadata");
+          }
+          await writeFile(options.outputFile, ciphertext);
+        }
+      }
       process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
     }
   );
@@ -293,6 +309,48 @@ function readStringField(payload: unknown, field: string): string {
     throw new Error(`response field ${field} must be a string`);
   }
   return value;
+}
+
+interface PullSnapshot {
+  readonly commit: string;
+  readonly ciphertextSha256: string;
+  readonly ciphertextSize: number;
+}
+
+function readSnapshotFromPullResponse(payload: unknown): PullSnapshot | null {
+  if (!payload || typeof payload !== "object" || !("snapshot" in payload)) {
+    throw new Error("pull response is missing snapshot");
+  }
+  const snapshot = payload.snapshot;
+  if (snapshot === null) {
+    return null;
+  }
+  if (!snapshot || typeof snapshot !== "object") {
+    throw new Error("pull response snapshot must be an object or null");
+  }
+  const commit = snapshot["commit" as keyof typeof snapshot];
+  const ciphertextSha256 = snapshot["ciphertextSha256" as keyof typeof snapshot];
+  const ciphertextSize = snapshot["ciphertextSize" as keyof typeof snapshot];
+  if (typeof commit !== "string" || typeof ciphertextSha256 !== "string" || typeof ciphertextSize !== "number") {
+    throw new Error("pull response snapshot is missing download metadata");
+  }
+  return {
+    commit,
+    ciphertextSha256,
+    ciphertextSize
+  };
+}
+
+async function getBytes(url: string, token: string): Promise<Uint8Array> {
+  const response = await fetch(url, {
+    method: "GET",
+    headers: authHeaders(token, {})
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`request failed with ${response.status}: ${redactCliError(text || response.statusText)}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {

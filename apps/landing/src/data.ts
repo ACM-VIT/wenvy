@@ -27,7 +27,7 @@ export const problems = [
 ] as const
 
 export const verbs = [
-  ['wenvy push', 'seal & upload a snapshot'],
+  ['wenvy push', 'seal locally, upload over Worker HTTPS'],
   ['wenvy pull', 'fetch head, envelopes, blob ref'],
   ['wenvy share', 'wrap keys for a teammate'],
   ['wenvy rotate', 'roll a team or repo key'],
@@ -37,7 +37,7 @@ export const verbs = [
 
 export const features = [
   { n: '01', title: 'End-to-end encryption', body: 'Encrypt and decrypt only on the client. The server enforces access but is cryptographically blind to your plaintext.', tag: 'zero-knowledge' },
-  { n: '02', title: 'SSH-first by design', body: 'Your existing SSH key is your identity and your decryption root. No new passwords, no browser detours.', tag: 'ed25519 / rsa' },
+  { n: '02', title: 'CLI-first data plane', body: 'The MVP pushes and pulls through Cloudflare Worker HTTPS routes while SSH keys remain the user trust root.', tag: 'worker http' },
   { n: '03', title: 'Branch-based access', body: 'dev, staging and production are first-class policy targets. Unmatched branches fall through to default-deny.', tag: 'exact › prefix › *' },
   { n: '04', title: 'Team RBAC', body: 'Viewer, editor, admin, owner at org, team and repo scope. Share a repo with a second team without cloning a secret.', tag: '4 roles · multi-team' },
   { n: '05', title: 'Rotation & recovery', body: 'Revoke a member and roll the team key as a checkpointed saga. A BIP39 recovery key brings you back without an admin.', tag: 'saga · bip39' },

@@ -5,6 +5,7 @@ Wenvy is a TypeScript-first, Cloudflare-native encrypted environment state platf
 ## Layout
 
 - `apps/web-worker`: Cloudflare Worker, Hono routes, Durable Objects, Queues, Workflows.
+- `apps/landing`: React/Vite landing page.
 - `packages/domain`: shared type-safe domain logic and regression-tested security rules.
 - `packages/terminal-client`: TypeScript `wenvy` terminal client.
 - `docs`: architecture and delivery planning.
@@ -16,6 +17,7 @@ pnpm install
 pnpm check
 pnpm test
 pnpm build
+pnpm landing:dev
 pnpm cloudflare:plan
 ```
 

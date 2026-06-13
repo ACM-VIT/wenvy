@@ -1,3 +1,4 @@
+import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { RotationWorkflowParams, WorkerEnv } from "../worker-env.js";
 import {
   createRotationJobRepository,

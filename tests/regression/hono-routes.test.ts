@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { createSnapshotObjectKey } from "@wenvy/domain";
 import { createHonoApp } from "../../apps/web-worker/src/worker/hono-app.js";
 import type {
   ServiceAccountTokenRecord,
@@ -9,6 +10,10 @@ import type { WorkerEnv } from "../../apps/web-worker/src/worker/worker-env.js";
 
 const serviceAccountId = "service_account_01JY7X0WENVYAAA";
 const bearerToken = "test-service-account-token";
+const repoId = "repo_01JY7X0WENVYAAA";
+const commitId = "commit_01JY7X0WENVYAAA";
+const ciphertextSha256 = "a".repeat(64);
+const snapshotObjectKey = createSnapshotObjectKey({ commitId, ciphertextSha256 });
 
 describe("Hono route regression", () => {
   it("serves OpenAPI document", async () => {
@@ -128,6 +133,19 @@ describe("Hono route regression", () => {
     expect(response.status).toBe(200);
     expect(body.objectKey).toMatch(/^snapshots\//u);
     expect(env.WENVY_BLOBS.put).toHaveBeenCalledOnce();
+    expect(env.WENVY_BLOBS.put).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(ArrayBuffer),
+      expect.objectContaining({
+        customMetadata: expect.objectContaining({
+          ciphertextSha256: digest,
+          commitId,
+          repoId,
+          branch: "main",
+          ciphertextSize: String(bytes.length)
+        })
+      })
+    );
     expect(repository.markLastUsed).toHaveBeenCalledOnce();
   });
 
@@ -272,12 +290,12 @@ describe("Hono route regression", () => {
         },
         body: JSON.stringify({
           expectedHead: null,
-          commitId: "commit_01JY7X0WENVYAAA",
+          commitId,
           parentCommitId: null,
           idempotencyKey: "idem_01JY7X0WENVYAAA",
-          payloadFingerprint: "a".repeat(64),
-          objectKey: "snapshots/opaque-object-key",
-          ciphertextSha256: "a".repeat(64),
+          payloadFingerprint: ciphertextSha256,
+          objectKey: snapshotObjectKey,
+          ciphertextSha256,
           ciphertextSize: 16,
           repoKeyVersion: 1,
           createdAt: "2026-06-13T12:00:00.000Z"
@@ -290,13 +308,14 @@ describe("Hono route regression", () => {
     expect(response.status).toBe(200);
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/finalize-push");
+    expect(env.WENVY_BLOBS.head).toHaveBeenCalledWith(snapshotObjectKey);
     await expect(forwardedRequests[0]!.json()).resolves.toMatchObject({
       repoId: "repo_01JY7X0WENVYAAA",
       branch: "main",
       expectedHead: null,
-      commit: "commit_01JY7X0WENVYAAA",
+      commit: commitId,
       parentCommit: null,
-      objectKey: "snapshots/opaque-object-key"
+      objectKey: snapshotObjectKey
     });
     expect(env.AUDIT_QUEUE.send).toHaveBeenCalledOnce();
     expect(env.AUDIT_QUEUE.send).toHaveBeenCalledWith(
@@ -310,12 +329,154 @@ describe("Hono route regression", () => {
         metadata: expect.objectContaining({
           repoId: "repo_01JY7X0WENVYAAA",
           branch: "main",
-          commit: "commit_01JY7X0WENVYAAA",
-          ciphertextSha256: "a".repeat(64),
+          commit: commitId,
+          ciphertextSha256,
           repoKeyVersion: 1
         })
       })
     );
+    expect(repository.markLastUsed).toHaveBeenCalledOnce();
+  });
+
+  it("rejects push finalization when the object key is not server-derived", async () => {
+    const forwardedRequests: Request[] = [];
+    const repository = fakeServiceAccountTokenRepository();
+    const env = fakeEnv({
+      repoBranchFetch: async (request) => {
+        forwardedRequests.push(request.clone());
+        return Response.json({
+          status: "committed",
+          commit: commitId,
+          headCommit: commitId
+        });
+      }
+    });
+
+    const response = await createHonoApp({
+      serviceAccountTokenRepository: repository
+    }).fetch(
+      new Request("https://wenvy.test/v1/repos/repo_01JY7X0WENVYAAA/branches/main/push/commit", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${bearerToken}`
+        },
+        body: JSON.stringify({
+          expectedHead: null,
+          commitId,
+          parentCommitId: null,
+          idempotencyKey: "idem_01JY7X0WENVYAAA",
+          payloadFingerprint: ciphertextSha256,
+          objectKey: createSnapshotObjectKey({ commitId, ciphertextSha256: "b".repeat(64) }),
+          ciphertextSha256,
+          ciphertextSize: 16,
+          repoKeyVersion: 1
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "blob-metadata-mismatch" });
+    expect(env.WENVY_BLOBS.head).not.toHaveBeenCalled();
+    expect(forwardedRequests).toHaveLength(0);
+  });
+
+  it("rejects push finalization when R2 metadata is not bound to the repo branch", async () => {
+    const forwardedRequests: Request[] = [];
+    const repository = fakeServiceAccountTokenRepository();
+    const env = fakeEnv({
+      blobHead: {
+        size: 16,
+        customMetadata: {
+          ciphertextSha256,
+          commitId,
+          repoId,
+          branch: "production",
+          ciphertextSize: "16"
+        }
+      },
+      repoBranchFetch: async (request) => {
+        forwardedRequests.push(request.clone());
+        return Response.json({
+          status: "committed",
+          commit: commitId,
+          headCommit: commitId
+        });
+      }
+    });
+
+    const response = await createHonoApp({
+      serviceAccountTokenRepository: repository
+    }).fetch(
+      new Request("https://wenvy.test/v1/repos/repo_01JY7X0WENVYAAA/branches/main/push/commit", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${bearerToken}`
+        },
+        body: JSON.stringify({
+          expectedHead: null,
+          commitId,
+          parentCommitId: null,
+          idempotencyKey: "idem_01JY7X0WENVYAAA",
+          payloadFingerprint: ciphertextSha256,
+          objectKey: snapshotObjectKey,
+          ciphertextSha256,
+          ciphertextSize: 16,
+          repoKeyVersion: 1
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "blob-metadata-mismatch" });
+    expect(forwardedRequests).toHaveLength(0);
+  });
+
+  it("rejects push finalization when the uploaded R2 blob is missing", async () => {
+    const forwardedRequests: Request[] = [];
+    const repository = fakeServiceAccountTokenRepository();
+    const env = fakeEnv({
+      blobHead: null,
+      repoBranchFetch: async (request) => {
+        forwardedRequests.push(request.clone());
+        return Response.json({
+          status: "committed",
+          commit: commitId,
+          headCommit: commitId
+        });
+      }
+    });
+
+    const response = await createHonoApp({
+      serviceAccountTokenRepository: repository
+    }).fetch(
+      new Request("https://wenvy.test/v1/repos/repo_01JY7X0WENVYAAA/branches/main/push/commit", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${bearerToken}`
+        },
+        body: JSON.stringify({
+          expectedHead: null,
+          commitId,
+          parentCommitId: null,
+          idempotencyKey: "idem_01JY7X0WENVYAAA",
+          payloadFingerprint: ciphertextSha256,
+          objectKey: snapshotObjectKey,
+          ciphertextSha256,
+          ciphertextSize: 16,
+          repoKeyVersion: 1
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "missing-blob" });
+    expect(forwardedRequests).toHaveLength(0);
     expect(repository.markLastUsed).toHaveBeenCalledOnce();
   });
 
@@ -365,6 +526,62 @@ describe("Hono route regression", () => {
     );
   });
 
+  it("downloads encrypted snapshot bytes through branch-scoped authorization", async () => {
+    const forwardedRequests: Request[] = [];
+    const bytes = new TextEncoder().encode("sealed-ciphertext-bytes");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const objectKey = createSnapshotObjectKey({ commitId, ciphertextSha256: digest });
+    const repository = fakeServiceAccountTokenRepository();
+    const env = fakeEnv({
+      blobBytes: bytes,
+      repoBranchFetch: async (request) => {
+        forwardedRequests.push(request.clone());
+        return Response.json({
+          status: "snapshot",
+          headCommit: commitId,
+          snapshot: {
+            commit: commitId,
+            parentCommit: null,
+            objectKey,
+            ciphertextSha256: digest,
+            ciphertextSize: bytes.byteLength,
+            repoKeyVersion: 1,
+            createdAt: "2026-06-13T12:00:00.000Z"
+          }
+        });
+      }
+    });
+
+    const response = await createHonoApp({
+      serviceAccountTokenRepository: repository
+    }).fetch(
+      new Request("https://wenvy.test/v1/repos/repo_01JY7X0WENVYAAA/branches/main/blobs/commit_01JY7X0WENVYAAA", {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${bearerToken}`
+        }
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
+    expect(response.headers.get("x-ciphertext-sha256")).toBe(digest);
+    expect(response.headers.get("x-wenvy-commit-id")).toBe(commitId);
+    expect(response.headers.get("x-ciphertext-size")).toBe(String(bytes.byteLength));
+    expect(response.headers.get("x-repo-key-version")).toBe("1");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    expect(forwardedRequests).toHaveLength(1);
+    await expect(forwardedRequests[0]!.json()).resolves.toEqual({
+      repoId,
+      branch: "main",
+      knownHead: null
+    });
+    expect(env.WENVY_BLOBS.get).toHaveBeenCalledWith(objectKey);
+    expect(repository.markLastUsed).toHaveBeenCalledOnce();
+  });
+
   it("queues rotation requests instead of starting workflows inline", async () => {
     const env = fakeEnv();
     const response = await createHonoApp().fetch(
@@ -400,6 +617,13 @@ describe("Hono route regression", () => {
 
 interface FakeEnvOptions {
   readonly repoBranchFetch?: (request: Request) => Promise<Response>;
+  readonly blobHead?: FakeR2ObjectHead | null;
+  readonly blobBytes?: Uint8Array | null;
+}
+
+interface FakeR2ObjectHead {
+  readonly size: number;
+  readonly customMetadata?: Record<string, string>;
 }
 
 function fakeServiceAccountTokenRepository(
@@ -422,10 +646,32 @@ function fakeServiceAccountTokenRepository(
 }
 
 function fakeEnv(options: FakeEnvOptions = {}): WorkerEnv {
+  const blobHead =
+    options.blobHead === undefined
+      ? {
+          size: 16,
+          customMetadata: {
+            ciphertextSha256,
+            commitId,
+            repoId,
+            branch: "main",
+            ciphertextSize: "16"
+          }
+        }
+      : options.blobHead;
+  const blobBytes = options.blobBytes ?? new Uint8Array();
   return {
     WENVY_DB: {} as Hyperdrive,
     WENVY_BLOBS: {
-      put: vi.fn(async () => undefined)
+      put: vi.fn(async () => undefined),
+      head: vi.fn(async () => blobHead),
+      get: vi.fn(async () =>
+        blobBytes === null
+          ? null
+          : ({
+              arrayBuffer: vi.fn(async () => toArrayBuffer(blobBytes))
+            } as unknown as R2ObjectBody)
+      )
     } as unknown as R2Bucket,
     WENVY_LOGS: {} as R2Bucket,
     WENVY_CONFIG_CACHE: {} as KVNamespace,
@@ -443,6 +689,12 @@ function fakeEnv(options: FakeEnvOptions = {}): WorkerEnv {
     },
     GITHUB_WEBHOOK_SECRET: "secret"
   };
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const arrayBuffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(arrayBuffer).set(bytes);
+  return arrayBuffer;
 }
 
 function fakeQueue<T>(): Queue<T> {

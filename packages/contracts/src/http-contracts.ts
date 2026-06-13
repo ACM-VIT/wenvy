@@ -2,6 +2,9 @@ import { z } from "zod";
 
 export const opaqueIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/u);
 export const sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/u);
+export const snapshotObjectKeySchema = z
+  .string()
+  .regex(/^snapshots\/[a-f0-9]{2}\/[A-Za-z0-9_-]{16,128}\/[a-f0-9]{64}\.enc$/u);
 export const dataRoleSchema = z.enum(["none", "viewer", "editor", "admin", "owner"]);
 export const branchOperationSchema = z.enum(["read", "write", "merge", "change-policy", "delete"]);
 
@@ -24,7 +27,7 @@ export const pushCommitRequestSchema = z.object({
   parentCommitId: z.string().min(1).nullable(),
   idempotencyKey: opaqueIdSchema,
   payloadFingerprint: sha256HexSchema.optional(),
-  objectKey: z.string().min(1),
+  objectKey: snapshotObjectKeySchema,
   ciphertextSha256: sha256HexSchema,
   ciphertextSize: z.number().int().nonnegative(),
   repoKeyVersion: z.number().int().positive(),

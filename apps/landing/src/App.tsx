@@ -5,7 +5,7 @@ import { Masthead } from './components/Masthead'
 import { Reveal } from './components/Reveal'
 import { Terminal } from './components/Terminal'
 import { Envelope } from './components/Envelope'
-import { problems, verbs, features, stages } from './data'
+import { features, problems, stages, verbs } from './data'
 
 const EASE = [0.16, 1, 0.3, 1] as const
 
@@ -47,9 +47,9 @@ export default function App() {
 
           <motion.div className="hero__lede" variants={item}>
             <p>
-              A <strong>zero-knowledge</strong>, <strong>SSH-first</strong>, end-to-end encrypted platform that syncs your
-              {' '}<code>.env</code> the way Git syncs your code. Plaintext never leaves your machine. The server stores
-              only ciphertext it can never read.
+              A <strong>zero-knowledge</strong>, <strong>CLI-first</strong>, end-to-end encrypted platform that syncs your
+              {' '}<code>.env</code> the way Git syncs your code. Worker HTTPS routes coordinate policy, audit and blobs;
+              plaintext never leaves your machine.
             </p>
           </motion.div>
 
@@ -112,7 +112,8 @@ export default function App() {
           <Reveal className="flow__side" delay={0.1}>
             <p className="lead">
               One canonical format. A signed commit DAG. Branches that map to real environments. Every push is
-              content-addressed by SHA-256, so identical state always hashes identically, with no noisy diffs and no blind overwrites.
+              content-addressed by SHA-256, then finalized through Worker routes that enforce service-account scope,
+              blob integrity and branch policy before the head moves.
             </p>
             <ul className="verbs">
               {verbs.map(([cmd, desc]) => (

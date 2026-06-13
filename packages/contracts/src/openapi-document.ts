@@ -146,7 +146,7 @@ export const openApiDocument = {
         properties: {
           commit: { $ref: "#/components/schemas/OpaqueId" },
           parentCommit: { type: ["string", "null"] },
-          objectKey: { type: "string" },
+          objectKey: { $ref: "#/components/schemas/SnapshotObjectKey" },
           ciphertextSha256: { $ref: "#/components/schemas/Sha256Hex" },
           ciphertextSize: { type: "integer", minimum: 0 },
           repoKeyVersion: { type: "integer", minimum: 1 },
@@ -158,7 +158,7 @@ export const openApiDocument = {
         type: "object",
         required: ["objectKey", "ciphertextSha256"],
         properties: {
-          objectKey: { type: "string" },
+          objectKey: { $ref: "#/components/schemas/SnapshotObjectKey" },
           ciphertextSha256: { $ref: "#/components/schemas/Sha256Hex" }
         },
         additionalProperties: false
@@ -239,7 +239,7 @@ export const openApiDocument = {
           parentCommitId: { type: ["string", "null"] },
           idempotencyKey: { $ref: "#/components/schemas/OpaqueId" },
           payloadFingerprint: { $ref: "#/components/schemas/Sha256Hex" },
-          objectKey: { type: "string" },
+          objectKey: { $ref: "#/components/schemas/SnapshotObjectKey" },
           ciphertextSha256: { $ref: "#/components/schemas/Sha256Hex" },
           ciphertextSize: { type: "integer", minimum: 0 },
           repoKeyVersion: { type: "integer", minimum: 1 },
@@ -296,6 +296,10 @@ export const openApiDocument = {
       Sha256Hex: {
         type: "string",
         pattern: "^[a-f0-9]{64}$"
+      },
+      SnapshotObjectKey: {
+        type: "string",
+        pattern: "^snapshots/[a-f0-9]{2}/[A-Za-z0-9_-]{16,128}/[a-f0-9]{64}\\.enc$"
       }
     }
   },
@@ -365,6 +369,61 @@ export const openApiDocument = {
         requestBody: jsonContent("PullRequest"),
         responses: {
           "200": jsonResponse("PullResponse"),
+          ...errorResponses
+        }
+      }
+    },
+    "/v1/repos/{repoId}/branches/{branch}/blobs/{commitId}": {
+      get: {
+        operationId: "downloadBranchSnapshotBlob",
+        summary: "Download current encrypted snapshot bytes for a branch commit",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "repoId",
+            in: "path",
+            required: true,
+            schema: { $ref: "#/components/schemas/OpaqueId" }
+          },
+          {
+            name: "branch",
+            in: "path",
+            required: true,
+            schema: { type: "string", minLength: 1 }
+          },
+          {
+            name: "commitId",
+            in: "path",
+            required: true,
+            schema: { $ref: "#/components/schemas/OpaqueId" }
+          }
+        ],
+        responses: {
+          "200": {
+            description: "Encrypted snapshot bytes",
+            headers: {
+              "x-wenvy-commit-id": {
+                schema: { $ref: "#/components/schemas/OpaqueId" }
+              },
+              "x-ciphertext-sha256": {
+                schema: { $ref: "#/components/schemas/Sha256Hex" }
+              },
+              "x-ciphertext-size": {
+                schema: { type: "integer", minimum: 0 }
+              },
+              "x-repo-key-version": {
+                schema: { type: "integer", minimum: 1 }
+              }
+            },
+            content: {
+              "application/octet-stream": {
+                schema: {
+                  type: "string",
+                  format: "binary"
+                }
+              }
+            }
+          },
           ...errorResponses
         }
       }

@@ -97,8 +97,8 @@ The implementation should not add a non-TypeScript gateway. Keep the MVP Worker-
 
 ## 4. Deployment Topology
 
-1. `app.wenvy.dev`
-   - Worker with Static Assets for the dashboard.
+1. `api.wenvy.dev`
+   - Worker Custom Domain for the system control plane and CLI-over-HTTPS data plane.
    - Hono HTTP routes under versioned paths such as `/v1`.
    - Bindings: Hyperdrive, R2, Queues, Durable Objects, Secrets Store, Analytics Engine.
 

@@ -65,7 +65,7 @@ code{ font-family:var(--f-mono); font-size:.92em; }
 }
 .mast__logo{ width:30px; height:30px; flex:0 0 auto; }
 .mast__nav{
-  justify-self:center; display:flex; gap:30px;
+  justify-self:center; display:flex; gap:clamp(16px,2.2vw,30px);
   font-size:12px; letter-spacing:.08em; text-transform:lowercase;
 }
 .mast__nav a{

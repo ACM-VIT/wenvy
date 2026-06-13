@@ -9,6 +9,7 @@ describe("HTTP contracts regression", () => {
       "/v1/auth/magic-link/consume",
       "/v1/blobs/{commitId}",
       "/v1/envelopes/validate",
+      "/v1/repos/{repoId}/branches/{branch}/blobs/{commitId}",
       "/v1/repos/{repoId}/branches/{branch}/pull",
       "/v1/repos/{repoId}/branches/{branch}/push/commit",
       "/v1/repos/{repoId}/branches/{branch}/push/intent",

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -166,6 +166,64 @@ describe("terminal CLI regression", () => {
     expect(result.stderr).toContain("token is required");
     expect(result.stderr).not.toContain("127.0.0.1");
   });
+
+  it("downloads pulled ciphertext through the authorized branch-scoped blob route", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wenvy-cli-"));
+    const outputFile = join(dir, "pulled-snapshot.bin");
+    const ciphertext = Buffer.from("sealed-pulled-ciphertext");
+    const ciphertextSha256 = createHash("sha256").update(ciphertext).digest("hex");
+    const plaintextMarker = "DATABASE_URL=postgres://secret";
+    const receivedRequests: ReceivedRequest[] = [];
+    const server = createServer(async (request, response) => {
+      await handleCliPullRequest(request, response, receivedRequests, ciphertext, ciphertextSha256);
+    });
+    await listen(server);
+
+    try {
+      const address = server.address() as AddressInfo;
+      const remoteUrl = `http://127.0.0.1:${address.port}`;
+      const result = await runCli([
+        "exec",
+        "tsx",
+        cliPath,
+        "pull",
+        "--remote-url",
+        remoteUrl,
+        "--repo",
+        "repo_01JY7X0WENVYAAA",
+        "--branch",
+        "main",
+        "--token",
+        "cli-test-token",
+        "--output-file",
+        outputFile
+      ]);
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        status: "snapshot",
+        snapshot: {
+          commit: "commit_01JY7X0WENVYAAA",
+          ciphertextSha256
+        }
+      });
+      expect(await readFile(outputFile)).toEqual(ciphertext);
+      expect(receivedRequests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        "POST /v1/repos/repo_01JY7X0WENVYAAA/branches/main/pull",
+        "GET /v1/repos/repo_01JY7X0WENVYAAA/branches/main/blobs/commit_01JY7X0WENVYAAA"
+      ]);
+      for (const request of receivedRequests) {
+        expect(request.headers.authorization).toBe("Bearer cli-test-token");
+      }
+      const serializedWireBodies = receivedRequests.map((request) => request.body.toString("utf8")).join("\n");
+      expect(serializedWireBodies).not.toContain(plaintextMarker);
+      expect(serializedWireBodies).not.toContain("DATABASE_URL");
+      expect(ciphertext.toString("utf8")).not.toContain("postgres://secret");
+    } finally {
+      await close(server);
+    }
+  });
 });
 
 interface ReceivedRequest {
@@ -211,6 +269,51 @@ async function handleCliPushRequest(
       commit: "commit_01JY7X0WENVYAAA",
       headCommit: "commit_01JY7X0WENVYAAA"
     });
+    return;
+  }
+
+  response.writeHead(404, { "content-type": "application/json" });
+  response.end(JSON.stringify({ error: "not-found" }));
+}
+
+async function handleCliPullRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  receivedRequests: ReceivedRequest[],
+  ciphertext: Buffer,
+  ciphertextSha256: string
+): Promise<void> {
+  const body = await readRequestBody(request);
+  receivedRequests.push({
+    method: request.method ?? "UNKNOWN",
+    url: request.url ?? "",
+    headers: request.headers,
+    body
+  });
+
+  if (request.method === "POST" && request.url === "/v1/repos/repo_01JY7X0WENVYAAA/branches/main/pull") {
+    writeJson(response, {
+      status: "snapshot",
+      headCommit: "commit_01JY7X0WENVYAAA",
+      snapshot: {
+        commit: "commit_01JY7X0WENVYAAA",
+        parentCommit: null,
+        objectKey: "snapshots/server-owned-object-key",
+        ciphertextSha256,
+        ciphertextSize: ciphertext.byteLength,
+        repoKeyVersion: 1,
+        createdAt: "2026-06-13T12:00:00.000Z"
+      }
+    });
+    return;
+  }
+
+  if (request.method === "GET" && request.url === "/v1/repos/repo_01JY7X0WENVYAAA/branches/main/blobs/commit_01JY7X0WENVYAAA") {
+    response.writeHead(200, {
+      "content-type": "application/octet-stream",
+      "x-ciphertext-sha256": ciphertextSha256
+    });
+    response.end(ciphertext);
     return;
   }
 

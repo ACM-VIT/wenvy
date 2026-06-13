@@ -44,6 +44,16 @@ interface AuthorizedServiceAccount {
   readonly organizationId: string | null;
 }
 
+interface SnapshotCommit {
+  readonly commit: string;
+  readonly parentCommit: string | null;
+  readonly objectKey: string;
+  readonly ciphertextSha256: string;
+  readonly ciphertextSize: number;
+  readonly repoKeyVersion: number;
+  readonly createdAt: string;
+}
+
 export function createHonoApp(options: HonoAppOptions = {}): Hono<AppBindings> {
   const app = new Hono<AppBindings>();
 
@@ -108,6 +118,11 @@ export function createHonoApp(options: HonoAppOptions = {}): Hono<AppBindings> {
       action: "branch.push.commit"
     });
     const input = pushCommitRequestSchema.parse(await context.req.json());
+    await verifyUploadedSnapshotBlob(context, {
+      repoId,
+      branch,
+      ...input
+    });
     const id = context.env.REPO_BRANCH_COORDINATOR.idFromName(`${repoId}:${branch}`);
     const stub = context.env.REPO_BRANCH_COORDINATOR.get(id);
 
@@ -201,6 +216,45 @@ export function createHonoApp(options: HonoAppOptions = {}): Hono<AppBindings> {
     return response;
   });
 
+  app.get("/v1/repos/:repoId/branches/:branch/blobs/:commitId", async (context) => {
+    const repoId = context.req.param("repoId");
+    const branch = context.req.param("branch");
+    const commitId = context.req.param("commitId");
+    await requireServiceAccountAuthorization(context, options, {
+      repoId,
+      branch,
+      operation: "pull",
+      action: "blob.download"
+    });
+
+    const snapshot = await currentBranchSnapshot(context, repoId, branch);
+    if (!snapshot || snapshot.commit !== commitId) {
+      throw jsonHttpException(404, "not-found", "snapshot blob is not current for this branch");
+    }
+
+    const object = await context.env.WENVY_BLOBS.get(snapshot.objectKey);
+    if (!object) {
+      throw jsonHttpException(404, "not-found", "snapshot blob is missing");
+    }
+    const ciphertext = await object.arrayBuffer();
+    const actualSha256 = await sha256BytesHex(ciphertext);
+    if (actualSha256 !== snapshot.ciphertextSha256 || ciphertext.byteLength !== snapshot.ciphertextSize) {
+      throw jsonHttpException(409, "blob-integrity-mismatch", "snapshot blob metadata does not match stored bytes");
+    }
+
+    return new Response(ciphertext, {
+      status: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        "x-ciphertext-sha256": snapshot.ciphertextSha256,
+        "x-wenvy-commit-id": snapshot.commit,
+        "x-ciphertext-size": String(snapshot.ciphertextSize),
+        "x-repo-key-version": String(snapshot.repoKeyVersion),
+        "content-length": String(ciphertext.byteLength)
+      }
+    });
+  });
+
   app.post("/v1/service-accounts/authorize", async (context) => {
     const input = serviceAccountAuthorizeRequestSchema.parse(await context.req.json());
     const decision = authorizeServiceAccount({
@@ -254,7 +308,10 @@ export function createHonoApp(options: HonoAppOptions = {}): Hono<AppBindings> {
       httpMetadata: { contentType: "application/octet-stream" },
       customMetadata: {
         ciphertextSha256,
-        commitId
+        commitId,
+        repoId,
+        branch,
+        ciphertextSize: String(body.byteLength)
       }
     });
 
@@ -440,6 +497,65 @@ function jsonHttpException(status: ContentfulStatusCode, error: string, message:
   return new HTTPException(status, {
     res: Response.json({ error, message }, { status })
   });
+}
+
+async function verifyUploadedSnapshotBlob(
+  context: AppContext,
+  input: {
+    readonly commitId: string;
+    readonly objectKey: string;
+    readonly ciphertextSha256: string;
+    readonly ciphertextSize: number;
+    readonly repoId: string;
+    readonly branch: string;
+  }
+): Promise<void> {
+  const expectedObjectKey = createSnapshotObjectKey({
+    commitId: input.commitId,
+    ciphertextSha256: input.ciphertextSha256
+  });
+  if (input.objectKey !== expectedObjectKey) {
+    throw jsonHttpException(409, "blob-metadata-mismatch", "snapshot object key does not match commit and ciphertext hash");
+  }
+
+  const object = await context.env.WENVY_BLOBS.head(expectedObjectKey);
+  if (!object) {
+    throw jsonHttpException(409, "missing-blob", "snapshot blob must be uploaded before push finalization");
+  }
+  if (
+    object.size !== input.ciphertextSize ||
+    object.customMetadata?.ciphertextSha256 !== input.ciphertextSha256 ||
+    object.customMetadata?.commitId !== input.commitId ||
+    object.customMetadata?.repoId !== input.repoId ||
+    object.customMetadata?.branch !== input.branch ||
+    object.customMetadata?.ciphertextSize !== String(input.ciphertextSize)
+  ) {
+    throw jsonHttpException(409, "blob-metadata-mismatch", "uploaded blob metadata does not match push finalization");
+  }
+}
+
+async function currentBranchSnapshot(
+  context: AppContext,
+  repoId: string,
+  branch: string
+): Promise<SnapshotCommit | null> {
+  const id = context.env.REPO_BRANCH_COORDINATOR.idFromName(`${repoId}:${branch}`);
+  const stub = context.env.REPO_BRANCH_COORDINATOR.get(id);
+  const response = await stub.fetch("https://repo-branch-coordinator/pull", {
+    method: "POST",
+    body: JSON.stringify({
+      repoId,
+      branch,
+      knownHead: null
+    })
+  });
+  if (!response.ok) {
+    throw jsonHttpException(409, "pull-conflict", "branch snapshot metadata is unavailable");
+  }
+  const decision = (await response.json()) as {
+    readonly snapshot?: SnapshotCommit | null;
+  };
+  return decision.snapshot ?? null;
 }
 
 async function sha256TextHex(text: string): Promise<string> {
