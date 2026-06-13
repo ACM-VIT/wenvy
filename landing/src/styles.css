@@ -100,7 +100,7 @@ code{ font-family:var(--f-mono); font-size:.92em; }
 .koi{ position:absolute; z-index:0; fill:var(--ink); aspect-ratio:580 / 687; pointer-events:none; }
 .koi--br{
   width:clamp(150px,17vw,256px);
-  right:-46px; bottom:-46px; transform:rotate(152deg) scaleY(-1);
+  right:-46px; bottom:24px; transform:rotate(152deg) scaleY(-1);
   animation:drift2 18s ease-in-out infinite;
 }
 .koi--closer{
