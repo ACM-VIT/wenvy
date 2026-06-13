@@ -148,6 +148,10 @@ code{ font-family:var(--f-mono); font-size:.92em; }
 :root{
   --speck:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='s'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.62' numOctaves='3' stitchTiles='stitch'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='discrete' tableValues='0 0 0 0 0 0 1 1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23s)'/%3E%3C/svg%3E");
 }
+/* if masking is unsupported, never let the overlay swallow the wordmark */
+@supports not ((-webkit-mask-image:url("#")) or (mask-image:url("#"))){
+  .wordmark__line::after{ display:none; }
+}
 .hero__hand{
   font-family:var(--f-hand); font-size:clamp(26px,4.4vw,52px);
   color:var(--ink); transform:rotate(-2deg); margin:-4px 0 26px;
