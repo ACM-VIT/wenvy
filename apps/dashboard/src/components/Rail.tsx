@@ -1,7 +1,6 @@
-import { Koi } from './Koi'
 import { Logo } from './Logo'
 import { NAV, type ViewId } from '../data'
-import { WENVY_API_URL, WENVY_CLI_PACKAGE, WENVY_CLI_VERSION } from '../product'
+import { WENVY_CLI_PACKAGE, WENVY_CLI_VERSION } from '../product'
 
 export function Rail({ view, onNavigate }: { view: ViewId; onNavigate: (v: ViewId) => void }) {
   return (
@@ -14,12 +13,6 @@ export function Rail({ view, onNavigate }: { view: ViewId; onNavigate: (v: ViewI
         <Logo className="rail__logo" /><span className="rail__name">wenvy</span>
       </a>
 
-      <button className="switcher" aria-label="Switch organization">
-        <span className="switcher__org">live deployment</span>
-        <span className="switcher__team">{WENVY_API_URL.replace("https://", "")}</span>
-        <span className="switcher__chev">⌄</span>
-      </button>
-
       <nav className="rail__nav" aria-label="Sections">
         {NAV.map((n) => (
           <a
@@ -28,19 +21,16 @@ export function Rail({ view, onNavigate }: { view: ViewId; onNavigate: (v: ViewI
             className={`navlink${view === n.id ? ' is-active' : ''}`}
             onClick={(e) => { e.preventDefault(); onNavigate(n.id) }}
           >
-            <span className="navlink__g">{n.glyph}</span>{n.label}
-            {n.pip ? <span className="navlink__pip">{n.pip}</span> : null}
+            {n.label}
           </a>
         ))}
       </nav>
 
       <div className="rail__foot">
-        <Koi className="rail__koi" />
         <div className="who">
           <span className="who__dot" />
           <div><b>{WENVY_CLI_PACKAGE}@{WENVY_CLI_VERSION}</b><span>npm package in use</span></div>
         </div>
-        <p className="rail__creed">plaintext never leaves your device</p>
       </div>
     </aside>
   )

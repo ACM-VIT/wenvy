@@ -16,7 +16,6 @@ export function Keys() {
       </table>
 
       <div className="invariant">
-        <span className="invariant__tick">✓</span>
         <p><b>No fake SSH devices.</b> The dashboard now avoids showing keys or sessions that were not created through the API.</p>
       </div>
     </>

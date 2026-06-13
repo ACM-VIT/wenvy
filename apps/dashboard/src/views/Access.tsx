@@ -19,7 +19,6 @@ export function Access() {
       </table>
 
       <div className="invariant">
-        <span className="invariant__tick">✓</span>
         <p><b>No member dummy data.</b> Users, teams, and grants need real API endpoints before the dashboard can show them. Until then, this view mirrors the access checks the CLI actually triggers.</p>
       </div>
     </>

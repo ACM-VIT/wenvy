@@ -24,7 +24,6 @@ export function Rotations({ api }: { readonly api: ApiStatusState }) {
       </table>
 
       <div className="invariant">
-        <span className="invariant__tick">✓</span>
         <p><b>No animated fake rotation.</b> Job history belongs here after the API exposes persisted rotation status.</p>
       </div>
     </>

@@ -30,7 +30,6 @@ export function Service({ api }: { readonly api: ApiStatusState }) {
       </table>
 
       <div className="invariant">
-        <span className="invariant__tick">✓</span>
         <p><b>No fake service accounts.</b> Token inventory should appear only after the API exposes a real service-account list endpoint.</p>
       </div>
     </>

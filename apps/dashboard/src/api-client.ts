@@ -20,6 +20,22 @@ export interface ApiRouteSummary {
   readonly requiresAuth: boolean;
 }
 
+export interface BranchSnapshot {
+  readonly commit: string;
+  readonly parentCommit: string | null;
+  readonly objectKey: string;
+  readonly ciphertextSha256: string;
+  readonly ciphertextSize: number;
+  readonly repoKeyVersion: number;
+  readonly createdAt: string;
+}
+
+export interface BranchPullResponse {
+  readonly status: "empty" | "up-to-date" | "snapshot" | "missing-snapshot";
+  readonly headCommit: string | null;
+  readonly snapshot: BranchSnapshot | null;
+}
+
 export function dashboardApiBaseUrl(): string {
   return (import.meta.env.VITE_WENVY_API_URL ?? WENVY_API_URL).replace(/\/+$/u, "");
 }
@@ -67,4 +83,42 @@ export async function fetchApiOpenApiSummary(signal?: AbortSignal): Promise<ApiO
     pathCount: paths.length,
     paths
   };
+}
+
+export async function pullBranchSnapshot(input: {
+  readonly apiBaseUrl: string;
+  readonly repo: string;
+  readonly branch: string;
+  readonly token: string;
+  readonly knownHead?: string | null;
+  readonly signal?: AbortSignal;
+}): Promise<BranchPullResponse> {
+  const response = await fetch(
+    `${input.apiBaseUrl}/v1/repos/${encodeURIComponent(input.repo)}/branches/${encodeURIComponent(input.branch)}/pull`,
+    {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${input.token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ knownHead: input.knownHead ?? null }),
+      signal: input.signal
+    }
+  );
+  const payload = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(readErrorMessage(payload, `pull failed with ${response.status}`));
+  }
+  return payload as BranchPullResponse;
+}
+
+function readErrorMessage(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === "object" && "message" in payload && typeof payload.message === "string") {
+    return payload.message;
+  }
+  if (payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string") {
+    return payload.error;
+  }
+  return fallback;
 }

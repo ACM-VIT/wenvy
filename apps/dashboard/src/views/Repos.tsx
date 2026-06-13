@@ -27,7 +27,6 @@ export function Repos({ api }: { readonly api: ApiStatusState }) {
       </table>
 
       <div className="invariant">
-        <span className="invariant__tick">✓</span>
         <p><b>No fake repository list.</b> The current API supports branch push, pull, blob upload, authorization, envelopes, rotations, and GitHub webhooks. Repository inventory should appear here only after the API exposes a real list endpoint.</p>
       </div>
     </>

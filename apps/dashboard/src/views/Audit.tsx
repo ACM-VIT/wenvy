@@ -19,7 +19,6 @@ export function Audit({ api }: { readonly api: ApiStatusState }) {
       </table>
 
       <div className="invariant">
-        <span className="invariant__tick">✓</span>
         <p><b>No fake audit log.</b> This page now reflects the real backend boundary instead of showing invented user activity.</p>
       </div>
     </>

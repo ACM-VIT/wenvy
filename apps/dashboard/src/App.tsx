@@ -11,9 +11,11 @@ import { Service } from './views/Service'
 import { Audit } from './views/Audit'
 import type { ViewId } from './data'
 import { useApiStatus, type ApiStatusState } from './use-api-status'
+import { useCliSync, type CliSyncController } from './use-cli-sync'
 
 interface ViewProps {
   readonly api: ApiStatusState
+  readonly sync: CliSyncController
 }
 
 const VIEWS: Record<ViewId, (props: ViewProps) => JSX.Element> = {
@@ -29,13 +31,14 @@ const VIEWS: Record<ViewId, (props: ViewProps) => JSX.Element> = {
 export default function App() {
   const [view, setView] = useState<ViewId>('overview')
   const api = useApiStatus()
+  const sync = useCliSync()
   const Active = VIEWS[view]
 
   return (
     <div className="shell">
       <Rail view={view} onNavigate={setView} />
       <main className="main">
-        <Top view={view} api={api} />
+        <Top view={view} api={api} sync={sync.state} />
         <AnimatePresence mode="wait">
           <motion.section
             key={view}
@@ -45,7 +48,7 @@ export default function App() {
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
           >
-            <Active api={api} />
+            <Active api={api} sync={sync} />
           </motion.section>
         </AnimatePresence>
       </main>
