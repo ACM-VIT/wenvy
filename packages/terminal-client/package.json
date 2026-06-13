@@ -11,6 +11,7 @@
     "check": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@wenvy/contracts": "workspace:*",
     "@wenvy/domain": "workspace:*",
     "commander": "^14.0.2"
   },

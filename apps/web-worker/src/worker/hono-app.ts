@@ -5,6 +5,8 @@ import {
   consumeTokenRequestSchema,
   envelopeValidationRequestSchema,
   openApiDocument,
+  pullRequestSchema,
+  pushCommitRequestSchema,
   pushIntentRequestSchema,
   rotationRequestSchema,
   serviceAccountAuthorizeRequestSchema
@@ -61,6 +63,43 @@ export function createHonoApp(): Hono<AppBindings> {
     const stub = context.env.REPO_BRANCH_COORDINATOR.get(id);
 
     return stub.fetch("https://repo-branch-coordinator/write-intent", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  });
+
+  app.post("/v1/repos/:repoId/branches/:branch/push/commit", async (context) => {
+    const repoId = context.req.param("repoId");
+    const branch = context.req.param("branch");
+    const input = pushCommitRequestSchema.parse(await context.req.json());
+    const id = context.env.REPO_BRANCH_COORDINATOR.idFromName(`${repoId}:${branch}`);
+    const stub = context.env.REPO_BRANCH_COORDINATOR.get(id);
+
+    return stub.fetch("https://repo-branch-coordinator/finalize-push", {
+      method: "POST",
+      body: JSON.stringify({
+        expectedHead: input.expectedHead,
+        commit: input.commitId,
+        parentCommit: input.parentCommitId,
+        idempotencyKey: input.idempotencyKey,
+        payloadFingerprint: input.payloadFingerprint,
+        objectKey: input.objectKey,
+        ciphertextSha256: input.ciphertextSha256,
+        ciphertextSize: input.ciphertextSize,
+        repoKeyVersion: input.repoKeyVersion,
+        createdAt: input.createdAt ?? new Date().toISOString()
+      })
+    });
+  });
+
+  app.post("/v1/repos/:repoId/branches/:branch/pull", async (context) => {
+    const repoId = context.req.param("repoId");
+    const branch = context.req.param("branch");
+    const input = pullRequestSchema.parse(await context.req.json());
+    const id = context.env.REPO_BRANCH_COORDINATOR.idFromName(`${repoId}:${branch}`);
+    const stub = context.env.REPO_BRANCH_COORDINATOR.get(id);
+
+    return stub.fetch("https://repo-branch-coordinator/pull", {
       method: "POST",
       body: JSON.stringify(input)
     });

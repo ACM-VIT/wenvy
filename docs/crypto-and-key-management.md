@@ -190,10 +190,10 @@ When a user registers a new SSH key (e.g., key #4 on a new device):
 |---|---|---|
 | Envelope encryption (SSH key → team key) | X25519 + AEAD via age-compatible envelope encryption | Audited TypeScript/Web Crypto-compatible age library selected by ADR |
 | Symmetric encryption (repo key → snapshot) | XChaCha20-Poly1305 | Audited TypeScript implementation selected by ADR |
-| Team/repo key material | 256-bit random | `crypto/rand` |
+| Team/repo key material | 256-bit random | Web Crypto `crypto.getRandomValues` |
 | Commit signing | Ed25519 signature | Web Crypto or audited TypeScript Ed25519 library |
-| Content hashing | SHA-256 | `crypto/sha256` |
+| Content hashing | SHA-256 | Web Crypto `SubtleCrypto.digest` or Node `crypto` in the terminal client |
 | Token hashing | SHA-256 or BLAKE2b | Web Crypto SHA-256 or audited TypeScript BLAKE2b |
-| Recovery key encoding | BIP39 mnemonic (24 words = 256 bits) | `github.com/tyler-smith/go-bip39` |
+| Recovery key encoding | BIP39 mnemonic (24 words = 256 bits) | Audited TypeScript BIP39 implementation selected by ADR |
 
 All symmetric keys are 256-bit. Nonces are randomly generated per encryption operation (never reused). AEAD construction ensures both confidentiality and integrity.

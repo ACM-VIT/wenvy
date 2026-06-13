@@ -18,6 +18,23 @@ export const pushIntentRequestSchema = z.object({
   payloadFingerprint: sha256HexSchema.optional()
 });
 
+export const pushCommitRequestSchema = z.object({
+  expectedHead: z.string().min(1).nullable(),
+  commitId: opaqueIdSchema,
+  parentCommitId: z.string().min(1).nullable(),
+  idempotencyKey: opaqueIdSchema,
+  payloadFingerprint: sha256HexSchema.optional(),
+  objectKey: z.string().min(1),
+  ciphertextSha256: sha256HexSchema,
+  ciphertextSize: z.number().int().nonnegative(),
+  repoKeyVersion: z.number().int().positive(),
+  createdAt: z.string().datetime().optional()
+});
+
+export const pullRequestSchema = z.object({
+  knownHead: z.string().min(1).nullable().optional()
+});
+
 export const serviceAccountAuthorizeRequestSchema = z.object({
   status: z.enum(["active", "suspended", "revoked"]),
   expiresAt: z.string().datetime().optional(),
@@ -41,6 +58,8 @@ export const rotationRequestSchema = z.object({
 
 export type ConsumeTokenRequest = z.infer<typeof consumeTokenRequestSchema>;
 export type PushIntentRequest = z.infer<typeof pushIntentRequestSchema>;
+export type PushCommitRequest = z.infer<typeof pushCommitRequestSchema>;
+export type PullRequest = z.infer<typeof pullRequestSchema>;
 export type ServiceAccountAuthorizeRequest = z.infer<typeof serviceAccountAuthorizeRequestSchema>;
 export type EnvelopeValidationRequest = z.infer<typeof envelopeValidationRequestSchema>;
 export type RotationRequest = z.infer<typeof rotationRequestSchema>;

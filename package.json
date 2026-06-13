@@ -9,6 +9,7 @@
     "check": "tsc -b --pretty false",
     "cloudflare:init": "tsx scripts/bootstrap-cloudflare.ts --apply",
     "cloudflare:plan": "tsx scripts/bootstrap-cloudflare.ts",
+    "cloudflare:preflight": "tsx scripts/bootstrap-cloudflare.ts --preflight",
     "cf:context": "cf context show",
     "cf:whoami": "cf auth whoami",
     "test": "vitest run",

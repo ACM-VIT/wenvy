@@ -6,8 +6,8 @@
   "scripts": {
     "build": "tsc -b",
     "check": "tsc -b --pretty false",
-    "dev": "wrangler dev ../../wrangler.jsonc",
-    "deploy": "wrangler deploy ../../wrangler.jsonc",
+    "dev": "wrangler dev --config ../../wrangler.jsonc",
+    "deploy": "wrangler deploy --config ../../wrangler.jsonc",
     "cf:types": "wrangler types --config ../../wrangler.jsonc"
   },
   "dependencies": {

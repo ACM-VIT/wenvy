@@ -111,9 +111,81 @@ describe("Hono route regression", () => {
     expect(body.objectKey).toMatch(/^snapshots\//u);
     expect(env.WENVY_BLOBS.put).toHaveBeenCalledOnce();
   });
+
+  it("forwards validated push finalization to the branch coordinator", async () => {
+    const forwardedRequests: Request[] = [];
+    const env = fakeEnv({
+      repoBranchFetch: async (request) => {
+        forwardedRequests.push(request.clone());
+        return Response.json({ status: "committed", headCommit: "commit_01JY7X0WENVYAAA" });
+      }
+    });
+
+    const response = await createHonoApp().fetch(
+      new Request("https://wenvy.test/v1/repos/repo_01JY7X0WENVYAAA/branches/main/push/commit", {
+        method: "POST",
+        body: JSON.stringify({
+          expectedHead: null,
+          commitId: "commit_01JY7X0WENVYAAA",
+          parentCommitId: null,
+          idempotencyKey: "idem_01JY7X0WENVYAAA",
+          payloadFingerprint: "a".repeat(64),
+          objectKey: "snapshots/opaque-object-key",
+          ciphertextSha256: "a".repeat(64),
+          ciphertextSize: 16,
+          repoKeyVersion: 1,
+          createdAt: "2026-06-13T12:00:00.000Z"
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(forwardedRequests).toHaveLength(1);
+    expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/finalize-push");
+    await expect(forwardedRequests[0]!.json()).resolves.toMatchObject({
+      expectedHead: null,
+      commit: "commit_01JY7X0WENVYAAA",
+      parentCommit: null,
+      objectKey: "snapshots/opaque-object-key"
+    });
+  });
+
+  it("forwards pull requests to the branch coordinator", async () => {
+    const forwardedRequests: Request[] = [];
+    const env = fakeEnv({
+      repoBranchFetch: async (request) => {
+        forwardedRequests.push(request.clone());
+        return Response.json({ status: "up-to-date", headCommit: "commit_01JY7X0WENVYAAA", snapshot: null });
+      }
+    });
+
+    const response = await createHonoApp().fetch(
+      new Request("https://wenvy.test/v1/repos/repo_01JY7X0WENVYAAA/branches/main/pull", {
+        method: "POST",
+        body: JSON.stringify({
+          knownHead: "commit_01JY7X0WENVYAAA"
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(forwardedRequests).toHaveLength(1);
+    expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/pull");
+    await expect(forwardedRequests[0]!.json()).resolves.toEqual({
+      knownHead: "commit_01JY7X0WENVYAAA"
+    });
+  });
 });
 
-function fakeEnv(): WorkerEnv {
+interface FakeEnvOptions {
+  readonly repoBranchFetch?: (request: Request) => Promise<Response>;
+}
+
+function fakeEnv(options: FakeEnvOptions = {}): WorkerEnv {
   return {
     WENVY_DB: {} as Hyperdrive,
     WENVY_BLOBS: {
@@ -122,7 +194,7 @@ function fakeEnv(): WorkerEnv {
     WENVY_LOGS: {} as R2Bucket,
     WENVY_CONFIG_CACHE: {} as KVNamespace,
     AUTH_TOKEN_COORDINATOR: fakeDurableObjectNamespace(),
-    REPO_BRANCH_COORDINATOR: fakeDurableObjectNamespace(),
+    REPO_BRANCH_COORDINATOR: fakeDurableObjectNamespace(options.repoBranchFetch),
     RATE_LIMIT_COORDINATOR: fakeDurableObjectNamespace(),
     GITHUB_DELIVERY_COORDINATOR: fakeDurableObjectNamespace(),
     GITHUB_SYNC_QUEUE: fakeQueue(),
@@ -143,11 +215,14 @@ function fakeQueue<T>(): Queue<T> {
   } as unknown as Queue<T>;
 }
 
-function fakeDurableObjectNamespace(): DurableObjectNamespace {
+function fakeDurableObjectNamespace(fetchHandler?: (request: Request) => Promise<Response>): DurableObjectNamespace {
   return {
     idFromName: vi.fn(() => ({})),
     get: vi.fn(() => ({
-      fetch: vi.fn(async () => Response.json({ status: "consumed" }))
+      fetch: vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        return fetchHandler ? fetchHandler(request) : Response.json({ status: "consumed" });
+      })
     }))
   } as unknown as DurableObjectNamespace;
 }

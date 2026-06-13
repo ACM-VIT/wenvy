@@ -55,6 +55,9 @@ importers:
 
   packages/terminal-client:
     dependencies:
+      '@wenvy/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@wenvy/domain':
         specifier: workspace:*
         version: link:../domain

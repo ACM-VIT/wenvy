@@ -100,6 +100,60 @@ export const openApiDocument = {
         },
         additionalProperties: true
       },
+      PushCommitResponse: {
+        type: "object",
+        required: ["status", "headCommit"],
+        properties: {
+          status: {
+            enum: [
+              "committed",
+              "duplicate",
+              "conflict",
+              "idempotency-conflict",
+              "missing-intent",
+              "commit-conflict"
+            ]
+          },
+          commit: { type: "string" },
+          headCommit: { type: ["string", "null"] },
+          snapshot: { $ref: "#/components/schemas/SnapshotCommit" }
+        },
+        additionalProperties: true
+      },
+      PullResponse: {
+        type: "object",
+        required: ["status", "headCommit", "snapshot"],
+        properties: {
+          status: { enum: ["empty", "up-to-date", "snapshot", "missing-snapshot"] },
+          headCommit: { type: ["string", "null"] },
+          snapshot: {
+            anyOf: [{ $ref: "#/components/schemas/SnapshotCommit" }, { type: "null" }]
+          }
+        },
+        additionalProperties: false
+      },
+      SnapshotCommit: {
+        type: "object",
+        required: [
+          "commit",
+          "parentCommit",
+          "objectKey",
+          "ciphertextSha256",
+          "ciphertextSize",
+          "repoKeyVersion",
+          "createdAt"
+        ],
+        properties: {
+          commit: { $ref: "#/components/schemas/OpaqueId" },
+          parentCommit: { type: ["string", "null"] },
+          objectKey: { type: "string" },
+          ciphertextSha256: { $ref: "#/components/schemas/Sha256Hex" },
+          ciphertextSize: { type: "integer", minimum: 0 },
+          repoKeyVersion: { type: "integer", minimum: 1 },
+          createdAt: { type: "string", format: "date-time" }
+        },
+        additionalProperties: false
+      },
       BlobUploadResponse: {
         type: "object",
         required: ["objectKey", "ciphertextSha256"],
@@ -163,6 +217,39 @@ export const openApiDocument = {
           nextCommit: { $ref: "#/components/schemas/OpaqueId" },
           idempotencyKey: { $ref: "#/components/schemas/OpaqueId" },
           payloadFingerprint: { $ref: "#/components/schemas/Sha256Hex" }
+        },
+        additionalProperties: false
+      },
+      PushCommitRequest: {
+        type: "object",
+        required: [
+          "expectedHead",
+          "commitId",
+          "parentCommitId",
+          "idempotencyKey",
+          "objectKey",
+          "ciphertextSha256",
+          "ciphertextSize",
+          "repoKeyVersion"
+        ],
+        properties: {
+          expectedHead: { type: ["string", "null"] },
+          commitId: { $ref: "#/components/schemas/OpaqueId" },
+          parentCommitId: { type: ["string", "null"] },
+          idempotencyKey: { $ref: "#/components/schemas/OpaqueId" },
+          payloadFingerprint: { $ref: "#/components/schemas/Sha256Hex" },
+          objectKey: { type: "string" },
+          ciphertextSha256: { $ref: "#/components/schemas/Sha256Hex" },
+          ciphertextSize: { type: "integer", minimum: 0 },
+          repoKeyVersion: { type: "integer", minimum: 1 },
+          createdAt: { type: "string", format: "date-time" }
+        },
+        additionalProperties: false
+      },
+      PullRequest: {
+        type: "object",
+        properties: {
+          knownHead: { type: ["string", "null"] }
         },
         additionalProperties: false
       },
@@ -253,6 +340,30 @@ export const openApiDocument = {
         requestBody: jsonContent("PushIntentRequest"),
         responses: {
           "200": jsonResponse("PushIntentResponse"),
+          ...errorResponses
+        }
+      }
+    },
+    "/v1/repos/{repoId}/branches/{branch}/push/commit": {
+      post: {
+        operationId: "commitBranchPush",
+        summary: "Finalize an encrypted snapshot push after blob upload",
+        security: [{ bearerAuth: [] }],
+        requestBody: jsonContent("PushCommitRequest"),
+        responses: {
+          "200": jsonResponse("PushCommitResponse"),
+          ...errorResponses
+        }
+      }
+    },
+    "/v1/repos/{repoId}/branches/{branch}/pull": {
+      post: {
+        operationId: "pullBranchSnapshot",
+        summary: "Read the latest encrypted snapshot metadata for a branch",
+        security: [{ bearerAuth: [] }],
+        requestBody: jsonContent("PullRequest"),
+        responses: {
+          "200": jsonResponse("PullResponse"),
           ...errorResponses
         }
       }
