@@ -101,15 +101,15 @@ code{ font-family:var(--f-mono); font-size:.92em; }
 }
 
 /* ---------- koi ---------- */
-.koi{ position:absolute; fill:var(--ink); aspect-ratio:580 / 687; pointer-events:none; }
+.koi{ position:absolute; z-index:0; fill:var(--ink); aspect-ratio:580 / 687; pointer-events:none; }
 .koi--tl{
-  width:clamp(96px,11vw,165px);
-  top:60px; left:-34px; transform:rotate(-16deg);
+  width:clamp(104px,11vw,168px);
+  top:-46px; left:-46px; transform:rotate(-12deg);
   animation:drift 14s ease-in-out infinite;
 }
 .koi--br{
-  width:clamp(140px,17vw,250px);
-  right:-26px; bottom:-34px; transform:rotate(152deg) scaleY(-1);
+  width:clamp(150px,17vw,256px);
+  right:-46px; bottom:-46px; transform:rotate(152deg) scaleY(-1);
   animation:drift2 18s ease-in-out infinite;
 }
 .koi--closer{
@@ -118,8 +118,8 @@ code{ font-family:var(--f-mono); font-size:.92em; }
   animation:drift 16s ease-in-out infinite;
 }
 @keyframes drift{
-  0%,100%{ transform:rotate(-18deg) translate(0,0); }
-  50%{ transform:rotate(-13deg) translate(8px,-14px); }
+  0%,100%{ transform:rotate(-12deg) translate(0,0); }
+  50%{ transform:rotate(-8deg) translate(6px,-12px); }
 }
 @keyframes drift2{
   0%,100%{ transform:rotate(150deg) scaleY(-1) translate(0,0); }
@@ -132,6 +132,7 @@ code{ font-family:var(--f-mono); font-size:.92em; }
   padding:140px var(--edge) 60px;
   display:flex; flex-direction:column; justify-content:center;
 }
+.hero__inner{ position:relative; z-index:1; } /* text sits above the koi */
 .hero__track{
   font-family:var(--f-mono); font-size:13px; letter-spacing:.34em;
   text-transform:uppercase; color:var(--ink); opacity:.75;
