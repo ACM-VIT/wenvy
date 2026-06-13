@@ -184,11 +184,11 @@ export function createHonoApp(): Hono<AppBindings> {
 
   app.post("/v1/rotations", async (context) => {
     const input = rotationRequestSchema.parse(await context.req.json());
-    const instance = await context.env.KEY_ROTATION_WORKFLOW.create({
-      id: input.rotationId,
-      params: input
+    await context.env.ROTATION_QUEUE.send({
+      ...input,
+      requestedAt: new Date().toISOString()
     });
-    return context.json({ workflowInstanceId: instance.id });
+    return context.json({ queued: true, rotationId: input.rotationId });
   });
 
   app.post("/webhooks/github", async (context) => {

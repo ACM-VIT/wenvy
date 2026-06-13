@@ -200,6 +200,38 @@ describe("Hono route regression", () => {
       knownHead: "commit_01JY7X0WENVYAAA"
     });
   });
+
+  it("queues rotation requests instead of starting workflows inline", async () => {
+    const env = fakeEnv();
+    const response = await createHonoApp().fetch(
+      new Request("https://wenvy.test/v1/rotations", {
+        method: "POST",
+        body: JSON.stringify({
+          rotationId: "rotation_01JY7X0WENVYAAA",
+          scopeType: "team",
+          scopeId: "team_01JY7X0WENVYAAA"
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      queued: true,
+      rotationId: "rotation_01JY7X0WENVYAAA"
+    });
+    expect(env.ROTATION_QUEUE.send).toHaveBeenCalledOnce();
+    expect(env.ROTATION_QUEUE.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rotationId: "rotation_01JY7X0WENVYAAA",
+        scopeType: "team",
+        scopeId: "team_01JY7X0WENVYAAA",
+        requestedAt: expect.any(String)
+      })
+    );
+    expect(env.KEY_ROTATION_WORKFLOW.create).not.toHaveBeenCalled();
+  });
 });
 
 interface FakeEnvOptions {

@@ -30,6 +30,7 @@ export interface RotationWorkflowParams {
   readonly rotationId: string;
   readonly scopeType: "team" | "repo";
   readonly scopeId: string;
+  readonly requestedAt?: string;
 }
 
 export interface WorkflowInstanceHandle {

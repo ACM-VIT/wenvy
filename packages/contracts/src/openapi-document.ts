@@ -183,9 +183,10 @@ export const openApiDocument = {
       },
       RotationResponse: {
         type: "object",
-        required: ["workflowInstanceId"],
+        required: ["queued", "rotationId"],
         properties: {
-          workflowInstanceId: { type: "string" }
+          queued: { type: "boolean" },
+          rotationId: { $ref: "#/components/schemas/OpaqueId" }
         },
         additionalProperties: false
       },
@@ -412,7 +413,7 @@ export const openApiDocument = {
     "/v1/rotations": {
       post: {
         operationId: "startRotation",
-        summary: "Start a checkpointed key rotation workflow",
+        summary: "Queue a checkpointed key rotation workflow",
         security: [{ bearerAuth: [] }],
         requestBody: jsonContent("RotationRequest"),
         responses: {

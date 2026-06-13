@@ -4,6 +4,12 @@ import type {
   AuditEventRecord,
   AuditEventRepository
 } from "../../apps/web-worker/src/worker/persistence/postgres/audit-event-repository.js";
+import type {
+  FailedRotationJobRecord,
+  QueuedRotationJobRecord,
+  RotationJobRepository,
+  StartedRotationWorkflowRecord
+} from "../../apps/web-worker/src/worker/persistence/postgres/rotation-job-repository.js";
 import type { WorkerEnv } from "../../apps/web-worker/src/worker/worker-env.js";
 
 describe("queue dispatch regression", () => {
@@ -84,6 +90,168 @@ describe("queue dispatch regression", () => {
     expect(message.ack).not.toHaveBeenCalled();
     expect(batch.retryAll).toHaveBeenCalledWith({ delaySeconds: 30 });
   });
+
+  it("persists rotation job state, starts workflow, then acks rotation queue messages", async () => {
+    const queued: QueuedRotationJobRecord[] = [];
+    const started: StartedRotationWorkflowRecord[] = [];
+    const repository: RotationJobRepository = {
+      enqueue: vi.fn(async (record) => {
+        queued.push(record);
+        return { status: "queued" };
+      }),
+      markWorkflowStarted: vi.fn(async (record) => {
+        started.push(record);
+      }),
+      advanceCheckpoint: vi.fn(async () => undefined),
+      markCompleted: vi.fn(async () => undefined),
+      markFailed: vi.fn(async () => undefined)
+    };
+    const workflowCreate = vi.fn(async () => ({ id: "workflow-instance-01" }));
+    const env = fakeEnv({ workflowCreate });
+    const message = fakeMessage({
+      rotationId: "rotation_01JY7X0WENVYAAA",
+      scopeType: "team",
+      scopeId: "team_01JY7X0WENVYAAA",
+      requestedAt: "2026-06-13T12:00:00.000Z"
+    });
+
+    await dispatchQueue(fakeBatch("wenvy-rotation-dev", [message]), env, fakeExecutionContext(), {
+      rotationJobRepository: repository
+    });
+
+    expect(repository.enqueue).toHaveBeenCalledOnce();
+    expect(queued[0]).toMatchObject({
+      rotationId: "rotation_01JY7X0WENVYAAA",
+      scopeType: "team",
+      scopeId: "team_01JY7X0WENVYAAA",
+      queueMessageId: message.id,
+      queuedAt: "2026-06-13T12:00:00.000Z"
+    });
+    expect(workflowCreate).toHaveBeenCalledWith({
+      id: "rotation_01JY7X0WENVYAAA",
+      params: message.body
+    });
+    expect(repository.markWorkflowStarted).toHaveBeenCalledOnce();
+    expect(started[0]).toMatchObject({
+      rotationId: "rotation_01JY7X0WENVYAAA",
+      workflowInstanceId: "workflow-instance-01"
+    });
+    expect(repository.markFailed).not.toHaveBeenCalled();
+    expect(message.ack).toHaveBeenCalledOnce();
+    expect(message.retry).not.toHaveBeenCalled();
+  });
+
+  it("retries invalid rotation queue messages without starting workflows", async () => {
+    const repository: RotationJobRepository = {
+      enqueue: vi.fn(async () => ({ status: "queued" })),
+      markWorkflowStarted: vi.fn(async () => undefined),
+      advanceCheckpoint: vi.fn(async () => undefined),
+      markCompleted: vi.fn(async () => undefined),
+      markFailed: vi.fn(async () => undefined)
+    };
+    const workflowCreate = vi.fn(async () => ({ id: "workflow-instance-01" }));
+    const message = fakeMessage({ rotationId: "missing-scope" });
+
+    await dispatchQueue(fakeBatch("wenvy-rotation-dev", [message]), fakeEnv({ workflowCreate }), fakeExecutionContext(), {
+      rotationJobRepository: repository
+    });
+
+    expect(repository.enqueue).not.toHaveBeenCalled();
+    expect(workflowCreate).not.toHaveBeenCalled();
+    expect(message.ack).not.toHaveBeenCalled();
+    expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 60 });
+  });
+
+  it("marks rotation jobs failed and retries when workflow creation fails", async () => {
+    const failed: FailedRotationJobRecord[] = [];
+    const repository: RotationJobRepository = {
+      enqueue: vi.fn(async () => ({ status: "queued" })),
+      markWorkflowStarted: vi.fn(async () => undefined),
+      advanceCheckpoint: vi.fn(async () => undefined),
+      markCompleted: vi.fn(async () => undefined),
+      markFailed: vi.fn(async (record) => {
+        failed.push(record);
+      })
+    };
+    const workflowCreate = vi.fn(async () => {
+      throw new Error("workflow unavailable");
+    });
+    const message = fakeMessage({
+      rotationId: "rotation_01JY7X0WENVYAAA",
+      scopeType: "repo",
+      scopeId: "repo_01JY7X0WENVYAAA"
+    });
+
+    await expect(
+      dispatchQueue(fakeBatch("wenvy-rotation-dev", [message]), fakeEnv({ workflowCreate }), fakeExecutionContext(), {
+        rotationJobRepository: repository
+      })
+    ).rejects.toThrow("workflow unavailable");
+
+    expect(repository.enqueue).toHaveBeenCalledOnce();
+    expect(repository.markWorkflowStarted).not.toHaveBeenCalled();
+    expect(repository.markFailed).toHaveBeenCalledOnce();
+    expect(failed[0]).toMatchObject({
+      rotationId: "rotation_01JY7X0WENVYAAA",
+      errorSummary: "workflow unavailable"
+    });
+    expect(message.ack).not.toHaveBeenCalled();
+    expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 30 });
+  });
+
+  it("acks duplicate running rotation jobs without starting another workflow", async () => {
+    const repository: RotationJobRepository = {
+      enqueue: vi.fn(async () => ({ status: "already-running" })),
+      markWorkflowStarted: vi.fn(async () => undefined),
+      advanceCheckpoint: vi.fn(async () => undefined),
+      markCompleted: vi.fn(async () => undefined),
+      markFailed: vi.fn(async () => undefined)
+    };
+    const workflowCreate = vi.fn(async () => ({ id: "workflow-instance-01" }));
+    const message = fakeMessage({
+      rotationId: "rotation_01JY7X0WENVYAAA",
+      scopeType: "team",
+      scopeId: "team_01JY7X0WENVYAAA"
+    });
+
+    await dispatchQueue(fakeBatch("wenvy-rotation-dev", [message]), fakeEnv({ workflowCreate }), fakeExecutionContext(), {
+      rotationJobRepository: repository
+    });
+
+    expect(workflowCreate).not.toHaveBeenCalled();
+    expect(repository.markWorkflowStarted).not.toHaveBeenCalled();
+    expect(message.ack).toHaveBeenCalledOnce();
+    expect(message.retry).not.toHaveBeenCalled();
+  });
+
+  it("retries without acking when workflow-start persistence fails", async () => {
+    const repository: RotationJobRepository = {
+      enqueue: vi.fn(async () => ({ status: "queued" })),
+      markWorkflowStarted: vi.fn(async () => {
+        throw new Error("start update failed");
+      }),
+      advanceCheckpoint: vi.fn(async () => undefined),
+      markCompleted: vi.fn(async () => undefined),
+      markFailed: vi.fn(async () => undefined)
+    };
+    const workflowCreate = vi.fn(async () => ({ id: "workflow-instance-01" }));
+    const message = fakeMessage({
+      rotationId: "rotation_01JY7X0WENVYAAA",
+      scopeType: "team",
+      scopeId: "team_01JY7X0WENVYAAA"
+    });
+
+    await expect(
+      dispatchQueue(fakeBatch("wenvy-rotation-dev", [message]), fakeEnv({ workflowCreate }), fakeExecutionContext(), {
+        rotationJobRepository: repository
+      })
+    ).rejects.toThrow("start update failed");
+
+    expect(workflowCreate).toHaveBeenCalledOnce();
+    expect(repository.markFailed).toHaveBeenCalledOnce();
+    expect(message.ack).not.toHaveBeenCalled();
+    expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 30 });
+  });
 });
 
 function fakeMessage(body: unknown): Message<unknown> {
@@ -109,7 +277,11 @@ function fakeBatch(queue: string, messages: readonly Message<unknown>[]): Messag
   };
 }
 
-function fakeEnv(): WorkerEnv {
+interface FakeEnvOptions {
+  readonly workflowCreate?: WorkerEnv["KEY_ROTATION_WORKFLOW"]["create"];
+}
+
+function fakeEnv(options: FakeEnvOptions = {}): WorkerEnv {
   return {
     WENVY_DB: { connectionString: "postgres://user:pass@example.com/db" } as Hyperdrive,
     WENVY_BLOBS: {} as R2Bucket,
@@ -125,7 +297,7 @@ function fakeEnv(): WorkerEnv {
     EMAIL_QUEUE: fakeQueue(),
     ROTATION_QUEUE: fakeQueue(),
     KEY_ROTATION_WORKFLOW: {
-      create: vi.fn(async () => ({ id: "workflow-instance" }))
+      create: options.workflowCreate ?? vi.fn(async () => ({ id: "workflow-instance" }))
     }
   };
 }

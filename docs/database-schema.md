@@ -680,12 +680,12 @@ Key fields:
 Purpose: Async key rotation orchestration and status.
 
 Key fields:
-- `id` (UUID)
+- `id` (opaque rotation ID)
 - `scope_type` (team, repo)
 - `scope_id`
 - `triggered_by` -> `users.id`
 - `status` (queued, running, completed, failed)
-- `checkpoint` (key_generated, envelopes_wrapped, repo_keys_rewrapped, old_key_retired)
+- `checkpoint` (queued, key_generated, envelopes_wrapped, repo_keys_rewrapped, old_key_retired, completed)
 - `progress_detail` (JSONB, tracks which repo keys are re-wrapped for partial failure recovery)
 - `workflow_instance_id` (Cloudflare Workflows instance identifier, nullable until workflow starts)
 - `queue_message_id` (Cloudflare Queues message identifier for initial dispatch, nullable)
@@ -695,6 +695,7 @@ Key fields:
 - `max_retries` (integer, default 3)
 
 Note: Cloudflare Workflows provide the durable execution path, but Postgres remains the auditable source of rotation status and security invariants.
+Worker/domain code uses kebab-case checkpoints; the Postgres adapter stores snake_case checkpoint values.
 
 ## 7. Core Constraints and Invariants
 

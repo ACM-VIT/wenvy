@@ -9,6 +9,7 @@ import {
   advanceRotationCheckpoint,
   markRepoKeyRewrapped
 } from "@wenvy/domain";
+import { toStoredRotationCheckpoint } from "../../apps/web-worker/src/worker/persistence/postgres/rotation-job-repository.js";
 
 describe("security primitive regression", () => {
   it("consumes one-time tokens once and rejects browser or IP mismatch", () => {
@@ -98,5 +99,14 @@ describe("security primitive regression", () => {
       "repo-key-1",
       "repo-key-2"
     ]);
+  });
+
+  it("maps rotation checkpoints to Postgres enum values explicitly", () => {
+    expect(toStoredRotationCheckpoint("queued")).toBe("queued");
+    expect(toStoredRotationCheckpoint("key-generated")).toBe("key_generated");
+    expect(toStoredRotationCheckpoint("envelopes-wrapped")).toBe("envelopes_wrapped");
+    expect(toStoredRotationCheckpoint("repo-keys-rewrapped")).toBe("repo_keys_rewrapped");
+    expect(toStoredRotationCheckpoint("old-key-retired")).toBe("old_key_retired");
+    expect(toStoredRotationCheckpoint("completed")).toBe("completed");
   });
 });
