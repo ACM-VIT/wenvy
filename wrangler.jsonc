@@ -1,0 +1,90 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wenvy",
+  "main": "apps/web-worker/src/worker/worker-entry.ts",
+  "compatibility_date": "2026-06-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AUTH_TOKEN_COORDINATOR",
+        "class_name": "AuthTokenCoordinator"
+      },
+      {
+        "name": "REPO_BRANCH_COORDINATOR",
+        "class_name": "RepoBranchCoordinator"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AuthTokenCoordinator", "RepoBranchCoordinator"]
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "WENVY_BLOBS",
+      "bucket_name": "wenvy-blobs-dev"
+    },
+    {
+      "binding": "WENVY_LOGS",
+      "bucket_name": "wenvy-logs-dev"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "WENVY_CONFIG_CACHE",
+      "id": "replace-with-config-cache-namespace-id"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "GITHUB_SYNC_QUEUE",
+        "queue": "wenvy-github-sync-dev"
+      },
+      {
+        "binding": "AUDIT_QUEUE",
+        "queue": "wenvy-audit-dev"
+      },
+      {
+        "binding": "ENVELOPE_CHECK_QUEUE",
+        "queue": "wenvy-envelope-check-dev"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "wenvy-github-sync-dev",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5
+      },
+      {
+        "queue": "wenvy-audit-dev",
+        "max_batch_size": 25,
+        "max_batch_timeout": 5
+      },
+      {
+        "queue": "wenvy-envelope-check-dev",
+        "max_batch_size": 10,
+        "max_batch_timeout": 10
+      }
+    ]
+  },
+  "workflows": [
+    {
+      "binding": "KEY_ROTATION_WORKFLOW",
+      "name": "wenvy-rotation-dev",
+      "class_name": "RotationWorkflow"
+    }
+  ],
+  "hyperdrive": [
+    {
+      "binding": "WENVY_DB",
+      "id": "replace-with-hyperdrive-id"
+    }
+  ]
+}

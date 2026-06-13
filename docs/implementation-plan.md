@@ -112,12 +112,12 @@ Exit criteria:
 - Merge conflicts correctly detected and interactively resolved.
 - Recovery key can decrypt team key envelope in isolation.
 
-## Step 3: SSH Gateway and Push/Pull
+## Step 3: Terminal Push/Pull
 
 Deliverables:
 
-- SSH key auth and command authorization.
-- Go SSH gateway deployable behind Cloudflare Tunnel for MVP.
+- Terminal client auth and command authorization.
+- Worker HTTPS push/pull endpoints for the TypeScript MVP.
 - Push uploads encrypted blob to R2 + metadata to Postgres.
 - Pull returns head, envelopes, and R2 blob references.
 - Branch head updates serialize through a `RepoBranchCoordinator` Durable Object.
@@ -126,7 +126,7 @@ Exit criteria:
 
 - Multi-device pull works for same user.
 - Ref update race handling validated.
-- Tunnel-published SSH endpoint passes CLI push/pull smoke tests.
+- CLI-over-HTTPS endpoint passes push/pull smoke tests.
 
 ## Step 4: Team and RBAC
 

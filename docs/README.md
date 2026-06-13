@@ -1,6 +1,6 @@
 # Wenvy Planning Docs
 
-This folder contains the architecture and delivery planning set for Wenvy, an SSH-first, end-to-end encrypted secrets sync platform.
+This folder contains the architecture and delivery planning set for Wenvy, a terminal-first, end-to-end encrypted secrets sync platform.
 
 ## Document Map
 
@@ -52,6 +52,6 @@ Purpose: GitHub App registration, identity linking, organization/team mappings, 
 - Wenvy is a secrets state sync system, not a source-code VCS replacement.
 - Server-side services are zero-knowledge for secret plaintext.
 - Secret encryption/decryption stays on client devices.
-- Web dashboard is governance-first; operational secret usage remains CLI-first.
+- Web dashboard is governance-first; operational secret usage remains terminal-client-first.
 - Branches (`dev`, `staging`, `production`, feature branches) are first-class policy targets with explicit access rules.
-- Cloudflare Workers are the default for the dashboard and HTTP control plane, but raw SSH remains a Go TCP service behind Cloudflare Tunnel or Spectrum.
+- The implementation is TypeScript-first. Cloudflare Workers are the default for the dashboard, HTTP control plane, and CLI-over-HTTPS data plane. Raw SSH compatibility is optional and requires a TypeScript Node TCP service behind Cloudflare Tunnel or Spectrum.

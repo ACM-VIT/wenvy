@@ -20,9 +20,10 @@ graph TB
         KV[Workers KV<br/>Read-mostly config cache]
     end
 
-    subgraph "SSH Data Plane"
-        Tunnel[Cloudflare Tunnel / Spectrum<br/>TCP edge for SSH]
-        SSH[Go SSH Gateway<br/>- Authenticate SSH keys<br/>- Authorize commands<br/>- Push / pull / share<br/>- Issue bridge tokens]
+    subgraph "Terminal Data Plane"
+        TerminalApi[Worker HTTPS Routes<br/>- Authenticate terminal client<br/>- Authorize commands<br/>- Push / pull / share<br/>- Issue bridge tokens]
+        Tunnel[Optional Tunnel / Spectrum<br/>TCP edge for SSH compatibility]
+        SSH[Optional TypeScript Node SSH Service<br/>- Authenticate SSH keys<br/>- Translate to Worker commands]
     end
 
     subgraph "State Layer"
@@ -44,12 +45,14 @@ graph TB
     WebUI -->|HTTPS| Edge
     CICD -->|HTTPS bearer token| Edge
     GitHub -->|HTTPS webhooks| Edge
-    CLI -->|SSH| Tunnel
+    CLI -->|HTTPS| Edge
+    CLI -.->|Optional SSH| Tunnel
 
     Edge --> AppWorker
     Edge -.-> Access
     Edge -.-> APIShield
-    Tunnel --> SSH
+    Tunnel -.-> SSH
+    SSH -.-> TerminalApi
 
     AppWorker --> BranchDO
     AppWorker --> Hyperdrive
@@ -64,10 +67,10 @@ graph TB
     RotationWF --> Hyperdrive
     RotationWF --> R2
 
-    SSH --> BranchDO
-    SSH --> Hyperdrive
-    SSH --> R2
-    SSH --> AppWorker
+    TerminalApi --> BranchDO
+    TerminalApi --> Hyperdrive
+    TerminalApi --> R2
+    TerminalApi --> AppWorker
 
     Hyperdrive --> PG
     AppWorker -.-> Secrets
@@ -76,7 +79,7 @@ graph TB
 
     CLI -.->|Plaintext exists only here| TB1
     AppWorker -.->|Metadata only| TB2
-    SSH -.->|Metadata + ciphertext only| TB2
+    TerminalApi -.->|Metadata + ciphertext only| TB2
     R2 -.->|Ciphertext objects| TB3
     PG -.->|No plaintext secrets| TB3
 
@@ -92,7 +95,7 @@ graph TB
     end
 
     AppWorker -.->|Evaluates| B1
-    SSH -.->|Evaluates| B1
+    TerminalApi -.->|Evaluates| B1
 
     subgraph ".wenvy/ Local Directory"
         LC[config.json<br/>head.json<br/>branches/<br/>envelopes/<br/>snapshots/<br/>keys/<br/>logs/]

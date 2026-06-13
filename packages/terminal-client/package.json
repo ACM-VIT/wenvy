@@ -1,0 +1,20 @@
+{
+  "name": "@wenvy/terminal-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "wenvy": "./dist/cli-entry.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@wenvy/domain": "workspace:*",
+    "commander": "^14.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}

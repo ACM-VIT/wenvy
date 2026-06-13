@@ -2,20 +2,20 @@
 
 ## 1. Objective
 
-Design Wenvy as a zero-knowledge, SSH-first secrets collaboration platform with:
+Design Wenvy as a zero-knowledge, terminal-first secrets collaboration platform with:
 
 - End-to-end encryption (E2EE)
 - Team-based RBAC (GitHub-like roles)
 - GitHub App-backed organization and team RBAC inheritance
 - Branch-based access control (`dev`, `staging`, `production`, feature branches)
 - Passwordless website authentication (email magic link + SSH bridge)
-- CLI-first secret operations
+- TypeScript CLI-first secret operations
 
 ## 2. Architecture Principles
 
 1. Client-side cryptography only for secret payloads.
 2. Server enforces identity, authorization, and audit, but cannot decrypt secrets.
-3. SSH is the primary secure transport for operational workflows.
+3. HTTPS Worker routes are the primary MVP transport for operational workflows; optional SSH compatibility can be added as a TypeScript Node origin.
 4. Web app is governance and access management first.
 5. Key rotation is a first-class lifecycle operation.
 6. Authorization is evaluated at both repo-level and branch-level policy scopes.
@@ -29,12 +29,12 @@ Design Wenvy as a zero-knowledge, SSH-first secrets collaboration platform with:
 - Push/pull over SSH.
 - Perform merge conflict logic locally.
 
-2. SSH Gateway Service
-- Authenticate SSH keys.
+2. Terminal Data Plane
+- Authenticate CLI requests.
 - Authorize commands against RBAC.
-- Route push/pull/share operations.
-- Issue SSH-to-web bridge login tokens.
-- Runs as a Go TCP service behind Cloudflare Tunnel for MVP or Cloudflare Spectrum for public L4 edge.
+- Route push/pull/share operations through Worker HTTPS endpoints.
+- Issue terminal-to-web bridge login tokens.
+- Optional SSH compatibility runs as a TypeScript Node TCP service behind Cloudflare Tunnel or Cloudflare Spectrum.
 
 3. Cloudflare Worker Web/API Control Plane
 - Passwordless email auth.
@@ -167,7 +167,7 @@ Design goal: compromise of server data stores should not reveal secret plaintext
 
 2. App layer
 - Cloudflare Worker dashboard/API.
-- Go SSH gateway origin behind Cloudflare Tunnel for MVP or Spectrum for public L4 edge.
+- Optional TypeScript Node SSH compatibility origin behind Cloudflare Tunnel or Spectrum.
 - Queue consumers and Workflow entrypoints for async jobs.
 
 3. State layer
@@ -262,28 +262,29 @@ DATABASE_URL=postgres://localhost/mydb
 MULTILINE_CERT=b64:LS0tLS1CRUdJTi...
 ```
 
-## 12. SSH Wire Protocol
+## 12. Terminal Wire Protocol
 
-1. Transport: standard SSH channel over the SSH gateway.
-2. Command dispatch: CLI sends a command string as the SSH exec request.
-3. Command vocabulary:
+1. MVP transport: HTTPS requests to Worker routes.
+2. Optional compatibility transport: standard SSH channel over the TypeScript Node SSH service.
+3. Command dispatch: CLI sends typed command payloads to Worker routes.
+4. Command vocabulary:
    - `wenvy push <repo> <branch>` — upload encrypted snapshot + commit metadata.
    - `wenvy pull <repo> <branch>` — download head commit metadata, envelopes, and blob reference.
    - `wenvy share <repo> <user>` — trigger envelope creation for a user.
    - `wenvy rotate <scope> <id>` — request key rotation.
    - `wenvy bridge-login` — request one-time web bridge token.
    - `wenvy keys list|add|revoke` — manage SSH keys.
-4. Payload encoding: length-prefixed JSON frames over the SSH channel.
+5. Payload encoding: JSON request/response bodies over HTTPS for MVP. Optional SSH compatibility uses length-prefixed JSON frames over the SSH channel.
    - Request frame: `{ "cmd": "push", "repo": "slug", "branch": "dev", "metadata": {...}, "blob_size": 4096 }`
    - Response frame: `{ "status": "ok", "data": {...} }` or `{ "status": "error", "code": "DENIED", "message": "..." }`
-5. Blob transfer: after metadata frame, raw ciphertext bytes streamed with length prefix.
-6. Idempotency: each push includes a client-generated idempotency key; server deduplicates within a TTL window.
+6. Blob transfer: ciphertext bytes uploaded to the Worker/R2 blob route after metadata authorization.
+7. Idempotency: each push includes a client-generated idempotency key; server deduplicates within a TTL window.
 
 ## 13. `.wenvy/` Local Directory Layout
 
 ```
 .wenvy/
-├── config.json          # Repo binding: org, team, repo slug, remote SSH host
+├── config.json          # Repo binding: org, team, repo slug, remote API host
 ├── state/
 │   ├── head.json        # Current local branch head references
 │   ├── branches/        # Per-branch metadata cache

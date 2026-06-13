@@ -16,7 +16,7 @@ Deliverables:
    - R2 for encrypted blobs.
    - Durable Objects for token consumption and branch write serialization.
    - Queues + Workflows for async jobs and rotation saga.
-   - Tunnel for MVP SSH ingress; Spectrum evaluated for public L4 edge.
+   - Worker HTTPS data plane for MVP; Tunnel/Spectrum evaluated only for optional SSH compatibility.
 
 Exit criteria:
 
@@ -49,7 +49,7 @@ Exit criteria:
 Deliverables:
 
 1. SSH auth and command dispatch.
-2. Cloudflare Tunnel-published SSH gateway for MVP.
+2. Worker HTTPS terminal data plane for MVP.
 3. R2 encrypted blob storage flow.
 4. Commit/branch metadata persistence in Postgres through Hyperdrive-backed Worker APIs.
 5. Basic audit event capture.
@@ -59,7 +59,7 @@ Exit criteria:
 
 - End-to-end push/pull across two devices for one user.
 - Branch head consistency checks pass.
-- SSH ingress works without exposing a public origin port in MVP topology.
+- CLI push/pull works without raw TCP ingress in MVP topology.
 
 ## 4. Phase 3: Teams, Sharing, RBAC
 

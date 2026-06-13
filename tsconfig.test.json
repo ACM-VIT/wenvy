@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["tests/**/*.ts"],
+  "references": [
+    { "path": "packages/domain" },
+    { "path": "packages/terminal-client" },
+    { "path": "apps/web-worker" }
+  ]
+}

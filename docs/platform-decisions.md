@@ -19,7 +19,7 @@ This document maps Wenvy's requirements to the platform services that fit the cu
 | Rotation saga orchestration | Workflows | Key rotation is multi-step, retryable, and checkpointed. Workflows map directly to durable step execution, retries, sleeps, and waiting for external events. |
 | Scheduled checks | Cron Triggers on Workers | Run envelope consistency checks, audit retention sweeps, stale invite cleanup, and backup validation triggers. |
 | Read-mostly config cache | Workers KV | Use only for read-heavy, non-authoritative data: feature flags, static public config, JWKS cache, and pricing/config snapshots. Do not use KV for tokens, branch heads, locks, or authorization decisions that require read-after-write consistency. |
-| SSH gateway | Go service behind Cloudflare Tunnel or Cloudflare Spectrum | The SSH protocol is raw TCP. Workers TCP sockets are outbound only today, so the Go SSH gateway must run as a real TCP service. Tunnel removes public origin ports; Spectrum is the Cloudflare L4 proxy option for public TCP/UDP services. |
+| Terminal data plane | Worker HTTPS routes for MVP; optional TypeScript Node SSH service behind Cloudflare Tunnel or Cloudflare Spectrum | Workers cannot accept inbound raw TCP today. Keeping the MVP on HTTPS keeps the implementation TypeScript-only. If SSH compatibility is required, it must run as a real TCP service outside Workers. |
 | Container workloads | Cloudflare Containers where the workload is HTTP-mediated or Worker-routed | Containers can run non-JavaScript code as part of Workers apps, but they should not be treated as a replacement for public raw TCP ingress until the target ingress path is verified. |
 | App credentials | Cloudflare Secrets Store or Worker secrets | Store provider credentials, signing keys for non-secret metadata, webhook secrets, and database credentials. Wenvy customer plaintext secrets must never be stored server-side. |
 | Abuse protection | WAF custom rules, WAF rate limiting, Turnstile, optional API Shield | Protect login, invite, service-account, and API surfaces at the edge. API Shield schema validation and mTLS are strongest for enterprise API hardening. |
@@ -81,18 +81,19 @@ Workers KV is eventually consistent. It is acceptable for read-heavy configurati
 
 Use Durable Objects and Postgres for those paths.
 
-## 3. SSH Gateway Options
+## 3. Terminal Data Plane Options
 
-Wenvy's CLI-first workflow depends on SSH. Cloudflare gives useful edge/networking options, but not all of them replace an SSH server.
+Wenvy's CLI-first workflow can run over Worker HTTPS routes in the TypeScript MVP. Cloudflare gives useful edge/networking options for future SSH compatibility, but Workers do not replace an SSH server.
 
 | Option | Fit | Notes |
 |---|---|---|
-| Go SSH gateway on a small VM/container + Cloudflare Tunnel | Best MVP/default | No public inbound port on the origin. The origin runs the real SSH server. Good for early production. |
-| Go SSH gateway behind Cloudflare Spectrum | Best public TCP edge when available | Spectrum is the L4 TCP/UDP proxy path for public SSH-like services. Plan availability and cost must be confirmed before committing. |
+| Worker HTTPS CLI routes | Best MVP/default | Fully TypeScript and Cloudflare-native. Uses Hono routes, Durable Objects, R2, Queues, Workflows, and Hyperdrive. |
+| TypeScript Node SSH service on a small VM/container + Cloudflare Tunnel | Optional compatibility | No public inbound port on the origin. The origin runs the real SSH server. |
+| TypeScript Node SSH service behind Cloudflare Spectrum | Optional public TCP edge | Spectrum is the L4 TCP/UDP proxy path for public SSH-like services. Plan availability and cost must be confirmed before committing. |
 | Cloudflare Containers | Watch/optional | Good for code that needs a container and is orchestrated by Workers. Do not assume public raw TCP SSH ingress until the exact route is validated. |
 | Workers only | Not viable for SSH today | Workers can create outbound TCP sockets, but inbound TCP connections to Workers are not currently supported. |
 
-The docs should continue to model the SSH gateway as a Go service. The HTTP control plane can be Worker-native.
+The implementation should not add a non-TypeScript gateway. Keep the MVP Worker-native and add SSH compatibility only through a TypeScript service if required.
 
 ## 4. Deployment Topology
 
@@ -105,9 +106,9 @@ The docs should continue to model the SSH gateway as a Go service. The HTTP cont
    - Optional separate Worker if API isolation is preferred.
    - Same bindings as dashboard, but no static asset serving.
 
-3. `ssh.wenvy.dev`
-   - Go SSH gateway origin.
-   - Published through Cloudflare Tunnel for MVP or Spectrum for public L4 edge.
+3. `ssh.wenvy.dev` (optional)
+   - TypeScript Node SSH compatibility origin.
+   - Published through Cloudflare Tunnel or Spectrum for public L4 edge.
    - Talks to the Worker HTTP control plane for authz decisions or directly to Postgres/R2 if latency requires it.
 
 4. Background processing

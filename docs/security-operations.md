@@ -156,7 +156,7 @@ On drift detection:
 
 1. Define SLO for push/pull and auth endpoints.
 2. Define max allowed delay for key rotation completion.
-3. Add health checks for SSH gateway, Worker API, Hyperdrive/Postgres, Durable Objects, Queues, Workflows, and R2.
+3. Add health checks for Worker API, terminal data-plane routes, Hyperdrive/Postgres, Durable Objects, Queues, Workflows, and R2.
 4. Use graceful degradation: governance UI can remain available during object store incidents.
 5. Track authorization decision latency including branch policy evaluation path.
 6. Define SLA for rotation job completion: e.g., team key rotation must complete within 5 minutes for teams with ≤50 members.

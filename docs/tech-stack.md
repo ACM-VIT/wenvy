@@ -2,7 +2,7 @@
 
 Reviewed: 2026-06-13
 
-Wenvy should be built as a Cloudflare-first platform for the dashboard, HTTP control plane, storage, coordination, security edge, and background orchestration. The CLI and raw SSH gateway stay outside the Worker runtime because Wenvy depends on local cryptography and inbound SSH/TCP behavior.
+Wenvy should be built as a Cloudflare-first TypeScript platform for the dashboard, HTTP control plane, storage, coordination, security edge, background orchestration, and terminal client. The MVP data plane uses CLI-over-HTTPS because Cloudflare Workers do not accept inbound raw TCP. Raw SSH compatibility can be added later as a TypeScript Node origin behind Tunnel or Spectrum.
 
 See `platform-decisions.md` for the decision matrix and source links.
 
@@ -16,31 +16,29 @@ See `platform-decisions.md` for the decision matrix and source links.
 
 ## 2. Recommended Primary Stack
 
-## CLI
+## Terminal Client
 
-- Language: Go
-- Packaging: single static binary per platform
-- CLI framework: Cobra
-- SSH client: `golang.org/x/crypto/ssh`
-- Crypto: `filippo.io/age` plus `golang.org/x/crypto/chacha20poly1305`
+- Language: TypeScript
+- Packaging: npm package with `wenvy` bin; single-file binary packaging can be added with a JS runtime packager later
+- CLI framework: Commander
+- Transport: HTTPS to Worker routes for MVP
+- Crypto: Web Crypto-compatible primitives and audited TypeScript libraries selected by ADR
 - Local metadata: JSON files under `.wenvy/`; use BoltDB only if local metadata becomes too complex for small files
 
 Why:
-- Fast startup and simple cross-platform distribution.
-- Good SSH and filesystem ergonomics.
+- One language across client, Worker, domain logic, tests, and generated API clients.
+- Good HTTP, filesystem, and package-distribution ergonomics.
 - Keeps all secret plaintext handling on the user device.
 
-## SSH Gateway
+## Terminal Data Plane
 
-- Language: Go
-- SSH server: `gliderlabs/ssh` or `golang.org/x/crypto/ssh`
-- Public edge: Cloudflare Tunnel for MVP; Cloudflare Spectrum if public L4 TCP proxying is required and plan availability fits
-- Origin runtime: small container/VM service, or Cloudflare Containers only after validating the exact ingress path for SSH
-- Protocol: length-prefixed JSON frames over SSH channels
+- MVP: TypeScript CLI-over-HTTPS routes on Workers.
+- Optional SSH compatibility: TypeScript Node TCP service behind Cloudflare Tunnel or Spectrum.
+- Protocol: typed JSON request/response contracts over HTTPS for MVP; SSH frames only if the optional compatibility service is added.
 
 Why:
 - Cloudflare Workers currently support outbound TCP sockets, but not inbound raw TCP connections to a Worker. A real SSH server is still required.
-- Tunnel removes public origin ports for MVP.
+- HTTPS keeps the MVP fully TypeScript and Worker-native.
 - Spectrum is the Cloudflare edge option for public TCP/UDP services when available.
 
 ## Web Dashboard and HTTP API
@@ -57,8 +55,8 @@ Why:
 - Hono keeps the control plane small and Worker-native.
 - React + Vite is enough for a governance dashboard and avoids unnecessary SSR/runtime coupling.
 
-Migration note:
-- The current `api/` Phoenix skeleton is a prototype artifact, not the preferred Cloudflare-native control plane. Keep it only if the team intentionally chooses a hybrid origin architecture.
+Repository note:
+- Keep implementation code under `apps/web-worker`, `packages/domain`, and `packages/terminal-client`.
 
 ## Data and Storage
 
@@ -154,12 +152,12 @@ Why:
 ## 4. Branch Policy Implementation Stack
 
 1. Policy storage: Postgres (`branch_policies`, `branch_role_rules`).
-2. Policy evaluation path: Worker API and SSH gateway both call a shared authorization module or service.
+2. Policy evaluation path: Worker API and terminal client contracts both use shared TypeScript authorization modules.
 3. Pattern precedence: exact match > prefix wildcard > global wildcard > default-deny.
 4. Write serialization: `RepoBranchCoordinator` Durable Object per repo branch.
 5. Approval workflow state: Postgres, with Durable Objects used only for coordination and idempotency.
 6. Audit hooks: emit event per denied/allowed protected-branch action.
-7. Branch deletion governance: enforced in SSH gateway and Worker API before any branch state mutation.
+7. Branch deletion governance: enforced in Worker API before any branch state mutation.
 
 ## 5. Deployment Targets
 
@@ -170,24 +168,23 @@ Why:
 - Object storage: private R2 bucket.
 - Coordination: Durable Objects for branch locks and token consumption.
 - Background jobs: Queues and Workflows.
-- SSH gateway: Go container/VM behind Cloudflare Tunnel.
+- Optional SSH compatibility service: TypeScript Node container/VM behind Cloudflare Tunnel.
 - Email: Resend or Postmark HTTPS API.
 
 ## Scale-up
 
 - Split dashboard, public API, internal admin API, queue consumers, and workflow entrypoints into separate Workers.
 - Use separate Hyperdrive configs for read/write or environment-specific database access.
-- Add Cloudflare Load Balancing for SSH gateway origins where Tunnel/Spectrum topology requires it.
+- Add Cloudflare Load Balancing for optional SSH compatibility origins where Tunnel/Spectrum topology requires it.
 - Add Logpush to R2 plus external SIEM.
 - Enable API Shield schema validation and mTLS for enterprise service-account endpoints.
 - Use Spectrum for public SSH edge if plan availability and cost are acceptable.
 
 ## 6. Optional Alternatives
 
-1. Keep Phoenix/Elixir API as an origin service if the team prefers Phoenix, but place it behind Cloudflare Tunnel and keep Workers as the edge/auth layer.
-2. Use D1 for a small hosted prototype if Postgres operations are too heavy at MVP time. Document this in an ADR and re-evaluate before multi-tenant launch.
-3. Use Next.js with OpenNext if dashboard SSR becomes important.
-4. Use Rust instead of Go for SSH gateway if the team has stronger Rust expertise.
+1. Use D1 for a small hosted prototype if Postgres operations are too heavy at MVP time. Document this in an ADR and re-evaluate before multi-tenant launch.
+2. Use Next.js with OpenNext if dashboard SSR becomes important.
+3. Add a TypeScript Node SSH compatibility service only if SSH UX remains a hard product requirement after the HTTPS CLI MVP.
 
 ## 7. Version and Dependency Policy
 
@@ -196,8 +193,8 @@ Why:
 3. Establish regular dependency audit cadence.
 4. Run SBOM generation and vulnerability scanning in CI.
 5. Crypto library selection rationale:
-   - Prefer `filippo.io/age` for SSH key-based envelope encryption.
-   - Prefer `golang.org/x/crypto/chacha20poly1305` for symmetric AEAD.
+   - Prefer Web Crypto where it covers the primitive.
+   - Prefer audited TypeScript libraries for age-compatible envelope encryption and XChaCha20-Poly1305.
    - Avoid rolling custom crypto; use audited, well-maintained libraries only.
 6. Cloudflare binding policy:
    - Define all bindings in `wrangler.jsonc` or `wrangler.toml`.

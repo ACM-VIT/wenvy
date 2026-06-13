@@ -1,0 +1,28 @@
+{
+  "name": "wenvy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.1.2",
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b --pretty false",
+    "cloudflare:init": "tsx scripts/bootstrap-cloudflare.ts --apply",
+    "cloudflare:plan": "tsx scripts/bootstrap-cloudflare.ts",
+    "cf:context": "cf context show",
+    "cf:whoami": "cf auth whoami",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "worker:dev": "wrangler dev",
+    "worker:deploy": "wrangler deploy",
+    "worker:types": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260613.1",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8",
+    "wrangler": "^4.100.0"
+  }
+}

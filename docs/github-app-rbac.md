@@ -26,7 +26,7 @@ Required configuration:
 | Repository permissions | None for RBAC sync |
 | Webhook | Active, HTTPS, secret configured |
 | Webhook events | `installation`, `membership`, `organization`, `team` |
-| Setup URL | `/api/integrations/github/setup` |
+| Setup URL | `/v1/integrations/github/setup` |
 | Callback URL | Optional; only required if user authorization is added |
 
 Use installation access tokens for reconciliation API calls. Do not store installation access tokens; generate them when needed and keep them only in memory for their short lifetime. Store the GitHub App private key and webhook secret in Cloudflare Secrets Store or Worker secrets.

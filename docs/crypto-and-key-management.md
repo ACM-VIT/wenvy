@@ -188,12 +188,12 @@ When a user registers a new SSH key (e.g., key #4 on a new device):
 
 | Purpose | Algorithm | Library |
 |---|---|---|
-| Envelope encryption (SSH key → team key) | X25519 + XSalsa20-Poly1305 (via `age`) | `filippo.io/age` (Go) |
-| Symmetric encryption (repo key → snapshot) | XChaCha20-Poly1305 | `golang.org/x/crypto/chacha20poly1305` |
+| Envelope encryption (SSH key → team key) | X25519 + AEAD via age-compatible envelope encryption | Audited TypeScript/Web Crypto-compatible age library selected by ADR |
+| Symmetric encryption (repo key → snapshot) | XChaCha20-Poly1305 | Audited TypeScript implementation selected by ADR |
 | Team/repo key material | 256-bit random | `crypto/rand` |
-| Commit signing | Ed25519 SSH signature | `golang.org/x/crypto/ssh` |
+| Commit signing | Ed25519 signature | Web Crypto or audited TypeScript Ed25519 library |
 | Content hashing | SHA-256 | `crypto/sha256` |
-| Token hashing | SHA-256 or BLAKE2b | `crypto/sha256` or `golang.org/x/crypto/blake2b` |
+| Token hashing | SHA-256 or BLAKE2b | Web Crypto SHA-256 or audited TypeScript BLAKE2b |
 | Recovery key encoding | BIP39 mnemonic (24 words = 256 bits) | `github.com/tyler-smith/go-bip39` |
 
 All symmetric keys are 256-bit. Nonces are randomly generated per encryption operation (never reused). AEAD construction ensures both confidentiality and integrity.
