@@ -136,8 +136,29 @@ describe("terminal CLI regression", () => {
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("[ok] config found");
-    expect(result.stdout).toContain("[ok] token: WENVY_TOKEN is set");
+    expect(result.stdout).toContain("[ok] token: found");
     expect(result.stdout).toContain("[skip] remote health");
+    expect(result.stdout).toContain("Ready.");
+  });
+
+  it("loads the token from the project .env file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wenvy-cli-"));
+    await spawnInitForProjectDir(dir);
+    await writeFile(join(dir, ".env"), "WENVY_TOKEN=cli-test-token\n", "utf8");
+
+    const result = spawnSync("pnpm", ["exec", "tsx", cliPath, "doctor", "--skip-network"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        WENVY_PROJECT_DIR: dir,
+        WENVY_TOKEN: ""
+      }
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("[ok] token: found");
     expect(result.stdout).toContain("Ready.");
   });
 
@@ -232,6 +253,7 @@ describe("terminal CLI regression", () => {
         ),
         "utf8"
       );
+      await writeFile(join(dir, ".env"), "WENVY_TOKEN=cli-test-token\n", "utf8");
 
       const result = await runCli(
         [
@@ -249,7 +271,7 @@ describe("terminal CLI regression", () => {
         ],
         {
           WENVY_PROJECT_DIR: dir,
-          WENVY_TOKEN: "cli-test-token"
+          WENVY_TOKEN: ""
         }
       );
 

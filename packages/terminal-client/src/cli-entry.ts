@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Command } from "commander";
@@ -13,13 +14,14 @@ import {
   type BranchPolicy
 } from "@wenvy/domain";
 
-const cliVersion = "0.1.1";
+const cliVersion = "0.1.3";
 const defaultRemoteUrl = "https://api.wenvy.dev";
 const dashboardUrl = "https://dash.wenvy.dev";
 const landingUrl = "https://wenvy.dev";
 const defaultBranch = "main";
 const configDirectoryName = ".wenvy";
 const configFileName = "config.json";
+const envFileNames = [".env.local", ".env"] as const;
 
 interface WenvyProjectConfig {
   readonly remoteUrl: string;
@@ -353,11 +355,11 @@ function formatInitOutput(config: WenvyProjectConfig, detected: DetectedGitProje
   const repoLine =
     config.repo === "repo_demo_replace_me"
       ? "  1. Edit .wenvy/config.json and replace repo_demo_replace_me"
-      : "  1. Export a service account token";
+      : "  1. Add your demo token to .env";
   const tokenLine =
     config.repo === "repo_demo_replace_me"
-      ? "  2. Export a service account token: export WENVY_TOKEN=<token>"
-      : "     export WENVY_TOKEN=<token>";
+      ? "  2. Add your demo token to .env: WENVY_TOKEN=<token>"
+      : "     WENVY_TOKEN=<token>";
   const doctorLine = config.repo === "repo_demo_replace_me" ? "  3. Run: wenvy doctor" : "  2. Run: wenvy doctor";
   const demoLine = config.repo === "repo_demo_replace_me" ? "  4. Run: wenvy demo" : "  3. Run: wenvy demo";
 
@@ -492,8 +494,8 @@ async function formatDemoOutput(): Promise<string> {
     "2. Initialize project defaults",
     `   wenvy init --repo ${repo} --branch ${branch}`,
     "",
-    "3. Export a service account token",
-    "   export WENVY_TOKEN=<token>",
+    "3. Add your demo token to the project .env",
+    "   WENVY_TOKEN=<token>",
     "",
     "4. Verify local config and the live Worker",
     "   wenvy doctor",
@@ -537,7 +539,7 @@ async function runDoctor(options: ConnectionOptions & { readonly skipNetwork?: b
   let ok = true;
   const config = await readProjectConfig();
   const detected = detectGitProjectDefaults();
-  const token = options.token ?? process.env.WENVY_TOKEN;
+  const token = readOptionalAuthToken(options.token);
 
   if (config) {
     lines.push(`[ok] config found: ${projectConfigPath()}`);
@@ -560,10 +562,10 @@ async function runDoctor(options: ConnectionOptions & { readonly skipNetwork?: b
   lines.push(`[ok] branch: ${branch}`);
 
   if (token) {
-    lines.push("[ok] token: WENVY_TOKEN is set");
+    lines.push("[ok] token: found");
   } else {
     ok = false;
-    lines.push("[fail] token missing: export WENVY_TOKEN=<token>");
+    lines.push("[fail] token missing: add WENVY_TOKEN=<token> to .env");
   }
 
   if (options.skipNetwork === true) {
@@ -804,11 +806,76 @@ function sha256Hex(bytes: Uint8Array): string {
 }
 
 function readAuthToken(cliToken: string | undefined): string {
-  const token = cliToken ?? process.env.WENVY_TOKEN;
+  const token = readOptionalAuthToken(cliToken);
   if (!token) {
-    throw new Error("token is required; pass --token or set WENVY_TOKEN");
+    throw new Error("token is required; pass --token, set WENVY_TOKEN, or add WENVY_TOKEN=<token> to .env");
   }
   return token;
+}
+
+function readOptionalAuthToken(cliToken: string | undefined): string | undefined {
+  return firstNonEmpty(cliToken, process.env.WENVY_TOKEN, readProjectEnvValue("WENVY_TOKEN"));
+}
+
+function firstNonEmpty(...values: readonly (string | undefined)[]): string | undefined {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
+function readProjectEnvValue(name: string): string | undefined {
+  for (const fileName of envFileNames) {
+    const value = readEnvValue(join(projectRoot(), fileName), name);
+    if (value) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function readEnvValue(path: string, name: string): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    if (typeof error === "object" && error && "code" in error && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+
+  for (const rawLine of text.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+    const normalized = line.startsWith("export ") ? line.slice("export ".length).trimStart() : line;
+    const equalsIndex = normalized.indexOf("=");
+    if (equalsIndex <= 0) {
+      continue;
+    }
+    const key = normalized.slice(0, equalsIndex).trim();
+    if (key !== name) {
+      continue;
+    }
+    return parseEnvValue(normalized.slice(equalsIndex + 1).trim());
+  }
+  return undefined;
+}
+
+function parseEnvValue(value: string): string {
+  if (
+    (value.startsWith("\"") && value.endsWith("\"")) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1);
+  }
+  const commentIndex = value.search(/\s#/u);
+  return (commentIndex >= 0 ? value.slice(0, commentIndex) : value).trim();
 }
 
 function authHeaders(token: string, headers: Record<string, string>): Record<string, string> {
