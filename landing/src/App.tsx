@@ -32,10 +32,6 @@ export default function App() {
         <Koi className="koi koi--br" />
 
         <motion.div className="hero__inner" variants={container} initial="hidden" animate="show">
-          <motion.p className="hero__track" variants={item}>
-            devtools &amp; infrastructure · secrets, versioned
-          </motion.p>
-
           <h1 className="wordmark" id="wordmark">
             <span className="wordmark__line" data-text="WEN">
               <motion.span style={{ display: 'inline-block' }} variants={lineUp}>WEN</motion.span>
