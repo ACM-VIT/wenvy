@@ -31,6 +31,9 @@ Purpose: Security controls, monitoring, incident handling, backup/recovery polic
 9. `roadmap-and-milestones.md`
 Purpose: MVP-to-production roadmap with acceptance criteria and measurable deliverables.
 
+10. `github-app-rbac.md`
+Purpose: GitHub App registration, identity linking, organization/team mappings, user overrides, effective-role evaluation, synchronization, and revocation behavior.
+
 ## Suggested Reading Order
 
 1. `system-design.md`
@@ -41,7 +44,8 @@ Purpose: MVP-to-production roadmap with acceptance criteria and measurable deliv
 6. `platform-decisions.md`
 7. `implementation-plan.md`
 8. `roadmap-and-milestones.md`
-9. `security-operations.md`
+9. `github-app-rbac.md`
+10. `security-operations.md`
 
 ## Scope Guardrails
 

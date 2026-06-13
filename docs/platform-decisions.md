@@ -15,6 +15,7 @@ This document maps Wenvy's requirements to the platform services that fit the cu
 | Encrypted snapshot blobs | R2 | Wenvy stores ciphertext objects only. R2 is S3-compatible object storage without typical cloud egress fees and with strong consistency per object. |
 | Single-use tokens and locks | Durable Objects | Magic-link consumption, bridge-token consumption, branch head serialization, per-repo write locks, and rate counters need consistent coordination. Durable Objects provide global uniqueness and strongly consistent transactional storage per object. |
 | Async tasks | Queues | Email retries, audit fanout, GitHub sync, envelope checks, and low-risk background jobs should use Queues for guaranteed delivery and buffering. |
+| GitHub RBAC integration | Organization-installed GitHub App with `Members: read-only` | Installation tokens, signed webhooks, and stable GitHub IDs provide least-privilege org/team membership sync without repository access or long-lived personal tokens. |
 | Rotation saga orchestration | Workflows | Key rotation is multi-step, retryable, and checkpointed. Workflows map directly to durable step execution, retries, sleeps, and waiting for external events. |
 | Scheduled checks | Cron Triggers on Workers | Run envelope consistency checks, audit retention sweeps, stale invite cleanup, and backup validation triggers. |
 | Read-mostly config cache | Workers KV | Use only for read-heavy, non-authoritative data: feature flags, static public config, JWKS cache, and pricing/config snapshots. Do not use KV for tokens, branch heads, locks, or authorization decisions that require read-after-write consistency. |
@@ -61,6 +62,12 @@ Use Queues for background fanout and retryable jobs. Use Workflows for long-runn
 ### Use R2 for ciphertext blobs only
 
 R2 stores encrypted snapshots and optional log exports. Object names should be content-addressed or UUID-based and should not reveal org names, repo names, branch names, environment names, or secret keys. R2 bucket access must be private and mediated by Workers or short-lived signed operations.
+
+### Use a GitHub App instead of OAuth or personal access tokens for RBAC sync
+
+Install the app on each linked GitHub organization and request only read-only `Members` organization permission. Use short-lived installation access tokens for reconciliation and signed webhooks for low-latency updates. User authorization is used only to prove the GitHub account linked to a Wenvy user.
+
+The integration does not request repository permission and does not write organization or team membership. GitHub-derived roles are bounded by Wenvy organization policy; `owner` remains local-only. See `github-app-rbac.md`.
 
 ### Do not use KV for security-critical mutable state
 

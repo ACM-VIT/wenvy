@@ -20,6 +20,7 @@
 3. Bridge token reuse attempts.
 4. MFA failure spikes (brute-force TOTP attempts).
 5. Service account token validation failures.
+6. Invalid GitHub webhook signatures and duplicate delivery spikes.
 
 ## Authorization Signals
 
@@ -29,6 +30,7 @@
 4. Repeated denied writes to protected branches (`staging`, `production`).
 5. **SSH data-plane rate limit breaches**: alerts when a user or service account exceeds push/pull rate thresholds, indicating possible exfiltration by a compromised key.
 6. Service account access outside allowed branch scope.
+7. GitHub-derived role elevation, stale reconciliation, and installation suspension.
 
 ## Crypto Lifecycle Signals
 
@@ -66,9 +68,10 @@ Critical events to capture:
 11. Recovery key generation and usage events.
 12. Multi-team repo access grants and revocations.
 13. Branch deletion events.
+14. GitHub App installation, mapping, override, reconciliation, and effective-role changes.
 
 Audit records should be immutable and queryable by org scope and time range.
-Audit actor field supports both `actor_user_id` and `actor_service_account_id` for full actor attribution.
+Audit actor attribution supports users, service accounts, the GitHub App, and system jobs.
 
 ## 4. Operational Runbooks
 
@@ -90,6 +93,15 @@ Audit actor field supports both `actor_user_id` and `actor_service_account_id` f
 2. Enforce temporary rate-limit escalation.
 3. Alert security channel.
 4. Require re-auth for privileged actions.
+
+## Incident: GitHub Integration Compromise
+
+1. Disable the installation in Wenvy and fail closed for GitHub-derived grants.
+2. Rotate the GitHub App private key and webhook secret.
+3. Revoke active installation tokens by suspending or uninstalling the app when necessary.
+4. Review webhook deliveries, mapping changes, user links, and effective-role audit events.
+5. Reconcile from GitHub before restoring access.
+6. Rotate affected team/repo keys if unauthorized envelope access may have occurred.
 
 ## Incident: Data Store Leak
 

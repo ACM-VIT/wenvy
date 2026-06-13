@@ -93,6 +93,22 @@ Why:
 - Workflows fit multi-step key rotation with checkpoints, retries, and partial-failure recovery.
 - Cron Triggers are enough to schedule consistency checks and cleanup jobs.
 
+## GitHub App RBAC
+
+- Integration type: organization-installed GitHub App
+- SDK: GitHub REST API through a Worker-compatible client such as Octokit
+- Organization permission: `Members: read-only`
+- Repository permissions: none for RBAC sync
+- Authentication: short-lived installation access tokens
+- Events: `installation`, `membership`, `organization`, and `team`
+- Delivery: signed webhook endpoint -> `github-sync` Queue -> Postgres reconciliation
+- Scheduled repair: Cron-triggered full reconciliation at least every six hours
+
+Why:
+- Installation identity and short-lived tokens avoid organization-wide personal access tokens.
+- Read-only membership access is sufficient to list organization and team members.
+- Webhooks reduce revocation delay; reconciliation repairs missed or reordered events.
+
 ## Email and Notifications
 
 - Provider: Resend, Postmark, or SES over HTTPS APIs

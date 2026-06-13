@@ -43,6 +43,8 @@ Build in vertical slices so each phase is usable, secure, and testable:
 - Invite and join flow.
 - Member removal and rotation triggers.
 - Multi-team repo access grants and revocations.
+- GitHub App installation, identity linking, org defaults, team mappings, and user overrides.
+- Webhook-driven sync plus scheduled full reconciliation.
 
 6. Branch Governance and Promotion
 - Branch policy model (`dev`, `staging`, `production`, wildcard branches).
@@ -136,6 +138,12 @@ Deliverables:
 - Multi-team repo access grants (`repo_team_access`).
 - Recovery key envelope creation during team join.
 - Multi-device SSH key addition flow (envelope re-wrap from existing device).
+- GitHub App with read-only `Members` permission.
+- GitHub organization/team reconciliation and immutable identity linking.
+- Organization role ceiling and default member policy.
+- Team member/maintainer role mappings.
+- User-level grant, cap, deny, reason, and expiry controls.
+- Effective-access explanation API and dashboard.
 
 Exit criteria:
 
@@ -144,6 +152,9 @@ Exit criteria:
 - Admin/Owner can manage access.
 - Secondary team members can pull with role ceiling enforcement.
 - Recovery key holders can recover access without admin intervention.
+- GitHub membership removal blocks new access and queues rotation.
+- GitHub sync cannot grant `owner` or bypass repo/branch policy.
+- Missed webhook events are repaired by full reconciliation.
 
 ## Step 5: Branch Controls and Protected Branch Workflow
 
@@ -271,6 +282,7 @@ Exit criteria:
 - Recovery flow: lose SSH key, recover via recovery key, re-wrap envelopes.
 - Multi-device: add second SSH key, verify envelope availability.
 - Multi-team: grant secondary team access, verify role ceiling, revoke and verify rotation.
+- GitHub App: install, link identity, map teams, change membership, verify effective role and rotation.
 
 5. Reliability tests
 - Concurrent pushes and branch conflict behavior.

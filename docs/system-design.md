@@ -6,6 +6,7 @@ Design Wenvy as a zero-knowledge, SSH-first secrets collaboration platform with:
 
 - End-to-end encryption (E2EE)
 - Team-based RBAC (GitHub-like roles)
+- GitHub App-backed organization and team RBAC inheritance
 - Branch-based access control (`dev`, `staging`, `production`, feature branches)
 - Passwordless website authentication (email magic link + SSH bridge)
 - CLI-first secret operations
@@ -63,7 +64,7 @@ Design Wenvy as a zero-knowledge, SSH-first secrets collaboration platform with:
 - Strongly consistent coordination for branch heads, idempotency, and rate counters.
 
 7. Queues, Workflows, and Scheduled Workers
-- GitHub org/team sync.
+- GitHub App webhook processing and scheduled org/team reconciliation.
 - Rotation jobs through Cloudflare Workflows.
 - Email delivery retries.
 - Envelope consistency checker through Cron Triggers and Queue consumers.
@@ -75,6 +76,14 @@ Design Wenvy as a zero-knowledge, SSH-first secrets collaboration platform with:
 - Service accounts cannot manage membership, rotate keys, or modify policies.
 - Pull-only or push-and-pull capability explicitly set per token.
 - Service account actions are fully audited under a dedicated actor type.
+
+9. GitHub App RBAC Adapter
+- Organization-installed GitHub App with read-only `Members` permission.
+- Links immutable GitHub user, organization, and team IDs to Wenvy identities.
+- Maps organization membership and GitHub teams to Wenvy roles.
+- Applies Wenvy organization policy and user-level grants, caps, and denies.
+- Receives signed webhooks and performs periodic reconciliation.
+- Never receives secret plaintext and never modifies GitHub membership.
 
 ## 4. Trust Boundaries
 
@@ -95,7 +104,7 @@ Design goal: compromise of server data stores should not reveal secret plaintext
 - Users, emails, SSH keys, sessions.
 
 2. Access Domain
-- Organizations, teams, roles, invitations.
+- Organizations, teams, roles, invitations, GitHub mappings, and user overrides.
 
 3. Policy Domain
 - Repo permissions, branch rules, protected branch controls.
@@ -216,9 +225,24 @@ Recommended approach:
 4. Auditability
 - Every membership and key lifecycle action must be traceable.
 - Every branch policy change and protected-branch write must be traceable.
+- Every GitHub-derived role change must identify the installation, delivery, mapping, and prior/effective role.
 
 5. Operability
 - Rotation, revocation, and incident response must be automatable.
+
+## 10. GitHub-Derived Authorization
+
+GitHub is authoritative only for memberships linked through the GitHub App. Wenvy remains authoritative for branch policy, cryptographic envelopes, local owners, and explicit user overrides.
+
+Effective role evaluation:
+
+1. Collect the organization default and mapped GitHub team grants.
+2. Add active user grants and choose the highest role.
+3. Bound the result by the organization role ceiling and user caps.
+4. Apply organization, team, and repo denies; deny wins.
+5. Apply repo ceilings and branch policy.
+
+GitHub sync can grant at most `admin`; Wenvy `owner` remains local-only. Membership removal blocks new access immediately and queues key rotation. See `github-app-rbac.md` for the complete contract.
 
 ## 11. Canonical Snapshot Format Specification
 

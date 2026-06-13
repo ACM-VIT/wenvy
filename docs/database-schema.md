@@ -7,6 +7,7 @@ This schema supports:
 - Passwordless identity and sessions
 - SSH key-based authentication
 - Team-based RBAC
+- GitHub App-derived organization and team RBAC
 - Branch-based access controls
 - End-to-end key envelope distribution
 - Repo versioning metadata
@@ -155,7 +156,190 @@ Key fields:
 - `accepted_at`
 - `created_by` -> `users.id`
 
-## 3a. Service Accounts (CI/CD)
+## 3a. GitHub App RBAC
+
+## `github_installations`
+Purpose: Bind one GitHub App installation to one Wenvy organization.
+
+Key fields:
+- `id` (UUID)
+- `organization_id` -> `organizations.id`
+- `github_installation_id` (bigint, unique)
+- `github_organization_id` (bigint, unique)
+- `github_organization_login` (display metadata only)
+- `status` (active, suspended, deleted)
+- `sync_mode` (monitor_only, enforced)
+- `default_org_membership_role` (member, admin; default member)
+- `github_org_owner_governance_role` (member, admin; default admin)
+- `default_access_role` (none, viewer, editor, admin)
+- `github_org_owner_access_role` (none, viewer, editor, admin)
+- `role_ceiling` (viewer, editor, admin)
+- `staleness_policy` (fail_closed, development_fail_open)
+- `max_staleness_seconds`
+- `last_webhook_at`
+- `last_reconciled_at`
+- `created_at`, `updated_at`
+
+Constraints:
+- One active installation per Wenvy organization.
+- GitHub-derived grants cannot produce `owner`.
+- Installation access tokens are never persisted.
+
+## `github_user_links`
+Purpose: Verified mapping between a Wenvy user and an immutable GitHub user identity.
+
+Key fields:
+- `id` (UUID)
+- `user_id` -> `users.id`
+- `github_user_id` (bigint, unique)
+- `github_login` (display metadata only)
+- `linked_at`
+- `unlinked_at`
+
+Constraints:
+- Partial unique index: `UNIQUE(user_id) WHERE unlinked_at IS NULL`
+- Partial unique index: `UNIQUE(github_user_id) WHERE unlinked_at IS NULL`
+
+Note: Links require GitHub user authorization. Email matching must not create a link.
+
+## `github_organization_memberships`
+Purpose: Last reconciled GitHub organization membership state.
+
+Key fields:
+- `github_installation_record_id` -> `github_installations.id`
+- `github_user_id` (bigint)
+- `github_login`
+- `github_role` (member, admin)
+- `state` (active, pending, removed)
+- `observed_at`
+- `removed_at`
+
+Primary key:
+- (`github_installation_record_id`, `github_user_id`)
+
+## `github_teams`
+Purpose: Mirror the minimum GitHub team metadata needed for mapping and reconciliation.
+
+Key fields:
+- `id` (UUID)
+- `github_installation_record_id` -> `github_installations.id`
+- `github_team_id` (bigint)
+- `github_node_id`
+- `slug`
+- `name`
+- `parent_github_team_id` (nullable)
+- `status` (active, deleted)
+- `observed_at`
+
+Unique constraint:
+- (`github_installation_record_id`, `github_team_id`)
+
+## `github_team_memberships`
+Purpose: Last reconciled direct GitHub team membership state.
+
+Key fields:
+- `github_team_record_id` -> `github_teams.id`
+- `github_user_id` (bigint)
+- `role` (member, maintainer)
+- `state` (active, pending, removed)
+- `observed_at`
+- `removed_at`
+
+Primary key:
+- (`github_team_record_id`, `github_user_id`)
+
+Note: Child-team membership does not implicitly create a parent-team grant. Each GitHub team must be mapped explicitly.
+
+## `github_team_mappings`
+Purpose: Map a GitHub team to a Wenvy team and role policy.
+
+Key fields:
+- `id` (UUID)
+- `github_team_record_id` -> `github_teams.id`
+- `team_id` -> `teams.id`
+- `member_role` (none, viewer, editor, admin)
+- `maintainer_role` (none, viewer, editor, admin)
+- `created_by` -> `users.id`
+- `created_at`, `updated_at`
+- `revoked_at`
+
+Unique constraint:
+- Partial unique index: `UNIQUE(github_team_record_id, team_id) WHERE revoked_at IS NULL`
+
+## `github_derived_role_grants`
+Purpose: Materialized, explainable grants produced by organization defaults and team mappings.
+
+Key fields:
+- `id` (UUID)
+- `organization_id` -> `organizations.id`
+- `user_id` -> `users.id`
+- `scope_type` (organization, team)
+- `scope_id`
+- `role` (viewer, editor, admin)
+- `source_type` (github_org_member, github_org_admin, github_team_member, github_team_maintainer)
+- `source_id` (GitHub organization or team ID)
+- `sync_run_id` -> `github_sync_runs.id`
+- `active`
+- `observed_at`
+- `revoked_at`
+
+Recommended index:
+- (`organization_id`, `user_id`, `active`) for authorization evaluation.
+
+## `user_role_overrides`
+Purpose: Wenvy-managed user grants, caps, and denies at organization, team, or repo scope.
+
+Key fields:
+- `id` (UUID)
+- `organization_id` -> `organizations.id`
+- `user_id` -> `users.id`
+- `scope_type` (organization, team, repo)
+- `scope_id`
+- `mode` (grant, cap, deny)
+- `role` (nullable for deny; viewer, editor, admin, owner)
+- `reason`
+- `is_break_glass`
+- `created_by` -> `users.id`
+- `expires_at`
+- `revoked_at`
+- `created_at`
+
+Constraints:
+- `reason` is required.
+- `owner` grants are allowed only at organization scope, from an existing owner, and never from GitHub-derived policy.
+- One active override per user, scope, and mode.
+
+## `github_webhook_deliveries`
+Purpose: Verify, deduplicate, and audit GitHub webhook receipt.
+
+Key fields:
+- `delivery_id` (UUID, primary key; value from `X-GitHub-Delivery`)
+- `github_installation_record_id` -> `github_installations.id` (nullable until resolved)
+- `event_type`
+- `action`
+- `signature_valid`
+- `payload_sha256`
+- `status` (received, queued, processed, failed, ignored)
+- `received_at`, `processed_at`
+- `error_summary`
+
+Note: Store only the redacted payload when operational replay is required. Do not retain access tokens or unnecessary personal data.
+
+## `github_sync_runs`
+Purpose: Track webhook-triggered and scheduled reconciliation.
+
+Key fields:
+- `id` (UUID)
+- `github_installation_record_id` -> `github_installations.id`
+- `trigger` (installation, webhook, scheduled, manual)
+- `delivery_id` -> `github_webhook_deliveries.delivery_id` (nullable)
+- `status` (queued, running, completed, partial, failed)
+- `started_at`, `finished_at`
+- `members_seen`, `teams_seen`, `grants_added`, `grants_revoked`
+- `rate_limit_remaining`
+- `error_summary`
+
+## 3b. Service Accounts (CI/CD)
 
 ## `service_accounts`
 Purpose: Machine identities for CI/CD pipelines and automation.
@@ -463,6 +647,7 @@ Key fields:
 - `organization_id` -> `organizations.id`
 - `actor_user_id` -> `users.id` (nullable for service account actions)
 - `actor_service_account_id` -> `service_accounts.id` (nullable for user actions)
+- `actor_type` (user, service_account, github_app, system)
 - `action`
 - `target_type`
 - `target_id`
@@ -477,7 +662,7 @@ Recommended indexes:
 - (`actor_user_id`, `created_at` DESC) for per-user audit trail
 - (`target_type`, `target_id`) for target-specific history
 
-Note: `target_id` is a generic UUID without a foreign key; referential integrity is enforced at the application layer. Either `actor_user_id` or `actor_service_account_id` must be non-null (application-enforced CHECK).
+Note: `target_id` is a generic UUID without a foreign key; referential integrity is enforced at the application layer. User and service-account actors require their corresponding ID. GitHub App and system actors use `actor_type` plus structured `metadata` containing the installation, delivery, or job identifier.
 
 ## `security_events`
 Purpose: Security anomalies and policy events.
@@ -520,6 +705,13 @@ Note: Cloudflare Workflows provide the durable execution path, but Postgres rema
 7. Soft-deleted entities (orgs, teams, repos) must not participate in new operations but must remain queryable for audit.
 8. Service account tokens must be scoped equal to or narrower than their parent service account.
 9. At most one active (non-revoked) role override per user per repo.
+10. GitHub-derived grants cannot produce `owner`.
+11. Unlinked GitHub identities cannot receive effective grants or key envelopes.
+12. A valid user-level deny overrides GitHub-derived and local grants at the same or narrower scope.
+13. GitHub membership removal must revoke online authorization before asynchronous key rotation begins.
+14. Protected branch rules cannot be bypassed by repo-level role alone.
+15. Every successful write operation emits an audit event.
+16. Secret blobs and metadata references must remain referentially consistent.
 
 ## 8. Recommended Index Summary
 
@@ -534,6 +726,7 @@ Note: Cloudflare Workflows provide the durable execution path, but Postgres rema
 | `web_sessions` | `(user_id, revoked_at)` | Active session lookup |
 | `service_account_tokens` | `(service_account_id, revoked_at)` | Active token lookup |
 | `repo_team_access` | `(repo_id) WHERE revoked_at IS NULL` | Active multi-team access lookup |
-6. Protected branch rules cannot be bypassed by repo-level role alone.
-7. Every successful write operation emits an audit event.
-8. Secret blobs and metadata references must remain referentially consistent.
+| `github_derived_role_grants` | `(organization_id, user_id, active)` | Effective-role evaluation |
+| `github_team_memberships` | `(github_user_id, state)` | Reconcile all team memberships for a user |
+| `user_role_overrides` | `(organization_id, user_id, revoked_at, expires_at)` | Active override lookup |
+| `github_sync_runs` | `(github_installation_record_id, started_at DESC)` | Integration health and audit history |

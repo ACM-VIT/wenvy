@@ -3,6 +3,7 @@ graph TB
         CLI[CLI Client<br/>- Encrypt/decrypt locally<br/>- Sign commits<br/>- Merge conflicts]
         WebUI[Web Browser<br/>- Email auth<br/>- Team management<br/>- Audit reports]
         CICD[CI/CD Pipeline<br/>- Scoped API tokens<br/>- Branch allow-lists]
+        GitHub[GitHub App<br/>- Org/team membership<br/>- Signed webhooks<br/>- Read-only Members permission]
     end
 
     subgraph "Cloudflare Edge"
@@ -42,6 +43,7 @@ graph TB
 
     WebUI -->|HTTPS| Edge
     CICD -->|HTTPS bearer token| Edge
+    GitHub -->|HTTPS webhooks| Edge
     CLI -->|SSH| Tunnel
 
     Edge --> AppWorker
@@ -56,6 +58,7 @@ graph TB
     AppWorker --> QueueWorkers
     AppWorker --> RotationWF
     QueueWorkers --> Hyperdrive
+    QueueWorkers -->|Installation token reconciliation| GitHub
     QueueWorkers --> R2
     RotationWF --> BranchDO
     RotationWF --> Hyperdrive

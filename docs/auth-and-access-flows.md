@@ -6,6 +6,7 @@
 2. CLI SSH key authentication.
 3. SSH-to-web bridge (terminal-authenticated browser login).
 4. Branch-aware authorization for all write operations.
+5. Optional GitHub App identity linking and RBAC inheritance.
 
 ## 2. Web Passwordless Account Flow
 
@@ -100,6 +101,19 @@ Restrictions:
    - This is a privileged, audit-logged operation.
    - Admin is notified of the request; they can approve or deny.
 
+## 5c. GitHub App Membership Flow
+
+1. A Wenvy owner installs the GitHub App on the corresponding GitHub organization.
+2. Wenvy stores the installation and immutable GitHub organization ID.
+3. A user links their GitHub identity through GitHub user authorization; email matching alone is never sufficient.
+4. Wenvy reconciles active organization and mapped team memberships.
+5. Organization defaults, team mappings, and user overrides produce the effective Wenvy role.
+6. Unlinked GitHub users remain pending and receive no key envelopes.
+7. When a linked membership grants access, envelope provisioning is queued.
+8. When GitHub-derived access is removed, new access is denied immediately and key rotation is queued.
+
+GitHub sync cannot grant Wenvy `owner`, bypass branch policy, or mutate GitHub membership. See `github-app-rbac.md`.
+
 ## 6. Role-Based Access Matrix
 
 1. `viewer`
@@ -124,6 +138,8 @@ Role scope note:
 
 - Team/repo role is baseline capability.
 - Branch policy can further restrict capabilities for specific branches.
+- GitHub mappings and local user overrides determine the baseline role for linked organizations.
+- Explicit denies and branch policy always take precedence over grants.
 
 ## 7. Branch-Based Access Rules
 

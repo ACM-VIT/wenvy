@@ -135,26 +135,30 @@ Exit criteria:
 
 Deliverables:
 
-1. GitHub org/team RBAC sync.
-2. Optional VS Code integration.
-3. Improved merge and conflict UX.
-4. Evaluate Spectrum for public SSH edge and Cloudflare Containers for any HTTP-mediated container workloads.
+1. Organization-installable GitHub App with read-only `Members` permission.
+2. Verified GitHub identity linking using immutable GitHub user IDs.
+3. Organization default roles, GitHub team mappings, and role ceiling.
+4. User-level grant, cap, and deny overrides with reason and expiry.
+5. Signed webhook processing and scheduled full reconciliation.
+6. Effective-access inspector and dry-run diff before enforcement.
+7. Immediate authorization revocation and queued key rotation on access loss.
+8. Optional VS Code integration.
+9. Improved merge and conflict UX.
+10. Evaluate Spectrum for public SSH edge and Cloudflare Containers for any HTTP-mediated container workloads.
 
-GitHub Sync Conflict Resolution:
-- GitHub team membership changes are treated as **proposals**, not overwrites.
-- When GitHub sync detects a divergence from Wenvy team membership:
-  - New GitHub team members are auto-added to the Wenvy team with the default role (configurable, default `viewer`).
-  - Members removed from the GitHub team are **flagged for review** but not auto-removed (to prevent accidental access revocation).
-  - Role changes in GitHub do not propagate to Wenvy roles (Wenvy roles are managed independently).
-  - Custom Wenvy role overrides are never overwritten by sync.
-- Admin notification is sent for all sync-triggered membership changes.
-- Sync conflicts (manual Wenvy changes conflicting with GitHub state) are logged and surfaced in the web dashboard.
-- Sync can be configured as: `disabled`, `one-way-add-only`, `one-way-full`, or `bidirectional` (future).
+GitHub authorization rules:
+- GitHub is authoritative for linked organization and team membership.
+- Wenvy remains authoritative for local owners, branch policy, role ceilings, and user overrides.
+- GitHub-derived access can grant at most `admin`.
+- Explicit Wenvy denies and branch policy always win.
+- Removals deny online access immediately; any configured grace period applies only to destructive key rotation.
 
 Exit criteria:
 
-- RBAC sync reliability validated.
-- Sync conflicts do not silently overwrite Wenvy-specific role assignments.
+- Installation, webhook, and reconciliation reliability validated.
+- User overrides remain independent from GitHub-derived grants and are visible in effective-access explanations.
+- Removed GitHub members cannot fetch envelopes or blobs after sync.
+- GitHub App requests no repository permission and cannot mutate GitHub membership.
 - Developer onboarding time reduced measurably.
 
 ## 8. KPI Suggestions
