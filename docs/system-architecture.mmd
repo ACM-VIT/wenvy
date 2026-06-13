@@ -1,0 +1,108 @@
+graph TB
+    subgraph "Client Layer"
+        CLI[CLI Client<br/>- Encrypt/decrypt locally<br/>- Sign commits<br/>- Merge conflicts]
+        WebUI[Web Browser<br/>- Email auth<br/>- Team management<br/>- Audit reports]
+        CICD[CI/CD Pipeline<br/>- Scoped API tokens<br/>- Branch allow-lists]
+    end
+
+    subgraph "Cloudflare Edge"
+        Edge[DNS + TLS<br/>WAF / Rate Limiting<br/>Turnstile]
+        Access[Cloudflare Access<br/>Internal and staging apps]
+        APIShield[API Shield<br/>Schema validation / optional mTLS]
+    end
+
+    subgraph "Cloudflare Workers Platform"
+        AppWorker[Dashboard + API Worker<br/>Static Assets + Hono<br/>OpenAPI contracts]
+        QueueWorkers[Queue Consumers<br/>Email retries<br/>Audit fanout<br/>GitHub sync<br/>Envelope checks]
+        RotationWF[Workflows<br/>Rotation saga<br/>Checkpointed retries]
+        BranchDO[Durable Objects<br/>Branch write serialization<br/>Single-use tokens<br/>Rate counters]
+        KV[Workers KV<br/>Read-mostly config cache]
+    end
+
+    subgraph "SSH Data Plane"
+        Tunnel[Cloudflare Tunnel / Spectrum<br/>TCP edge for SSH]
+        SSH[Go SSH Gateway<br/>- Authenticate SSH keys<br/>- Authorize commands<br/>- Push / pull / share<br/>- Issue bridge tokens]
+    end
+
+    subgraph "State Layer"
+        Hyperdrive[Hyperdrive<br/>Postgres connection pooling]
+        PG[(Managed Postgres<br/>- Identity/auth<br/>- RBAC relations<br/>- Branch policies<br/>- Crypto metadata<br/>- Commits/branches<br/>- Audit events)]
+        R2[(Cloudflare R2<br/>Encrypted snapshots only<br/>Log exports)]
+    end
+
+    subgraph "Security Material"
+        Secrets[Cloudflare Secrets Store<br/>Provider credentials<br/>Non-secret-data signing keys]
+    end
+
+    subgraph "Trust Boundaries"
+        TB1[Trusted: User device + private keys]
+        TB2[Semi-trusted: Server control plane]
+        TB3[Untrusted: Network + storage dumps]
+    end
+
+    WebUI -->|HTTPS| Edge
+    CICD -->|HTTPS bearer token| Edge
+    CLI -->|SSH| Tunnel
+
+    Edge --> AppWorker
+    Edge -.-> Access
+    Edge -.-> APIShield
+    Tunnel --> SSH
+
+    AppWorker --> BranchDO
+    AppWorker --> Hyperdrive
+    AppWorker --> R2
+    AppWorker --> KV
+    AppWorker --> QueueWorkers
+    AppWorker --> RotationWF
+    QueueWorkers --> Hyperdrive
+    QueueWorkers --> R2
+    RotationWF --> BranchDO
+    RotationWF --> Hyperdrive
+    RotationWF --> R2
+
+    SSH --> BranchDO
+    SSH --> Hyperdrive
+    SSH --> R2
+    SSH --> AppWorker
+
+    Hyperdrive --> PG
+    AppWorker -.-> Secrets
+    QueueWorkers -.-> Secrets
+    RotationWF -.-> Secrets
+
+    CLI -.->|Plaintext exists only here| TB1
+    AppWorker -.->|Metadata only| TB2
+    SSH -.->|Metadata + ciphertext only| TB2
+    R2 -.->|Ciphertext objects| TB3
+    PG -.->|No plaintext secrets| TB3
+
+    subgraph "Branch Access Control"
+        B1[1. Validate identity]
+        B2[2. Check org/team membership]
+        B3[3. Check repo permission]
+        B4[4. Match branch policy]
+        B5[5. Serialize branch update in Durable Object]
+        B6[6. Persist audit and branch state]
+
+        B1 --> B2 --> B3 --> B4 --> B5 --> B6
+    end
+
+    AppWorker -.->|Evaluates| B1
+    SSH -.->|Evaluates| B1
+
+    subgraph ".wenvy/ Local Directory"
+        LC[config.json<br/>head.json<br/>branches/<br/>envelopes/<br/>snapshots/<br/>keys/<br/>logs/]
+    end
+
+    CLI -.->|Maintains| LC
+
+    classDef trusted fill:#90EE90
+    classDef semiTrusted fill:#FFD700
+    classDef untrusted fill:#FFB6C1
+    classDef encrypted fill:#87CEEB
+
+    class TB1 trusted
+    class TB2 semiTrusted
+    class TB3 untrusted
+    class R2 encrypted
