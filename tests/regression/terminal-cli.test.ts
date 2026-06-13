@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
@@ -22,6 +23,7 @@ describe("terminal CLI regression", () => {
     expect(result.stdout).toContain("wenvy init --repo <repo-id>");
     expect(result.stdout).toContain("wenvy doctor");
     expect(result.stdout).toContain("wenvy demo");
+    expect(result.stdout).toContain("https://dash.wenvy.dev");
   });
 
   it("initializes project config with explicit repo and branch defaults", async () => {
@@ -52,6 +54,71 @@ describe("terminal CLI regression", () => {
     expect(await readFile(join(dir, ".wenvy", ".gitignore"), "utf8")).toContain("*.token");
   });
 
+  it("infers repo and branch from the current git repository when init has no repo flag", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wenvy-cli-git-"));
+    mkdirSync(join(dir, "nested"), { recursive: true });
+    runGit(["init", "-b", "feature/demo"], dir);
+    runGit(["remote", "add", "origin", "git@github.com:ACM-VIT/ExamCooker-2024.git"], dir);
+
+    const result = spawnSync("pnpm", ["exec", "tsx", cliPath, "init"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        WENVY_PROJECT_DIR: join(dir, "nested")
+      }
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Detected:");
+    expect(result.stdout).toContain("git remote: git@github.com:ACM-VIT/ExamCooker-2024.git");
+    expect(result.stdout).toContain("repo id:    git_ACM-VIT_ExamCooker-2024");
+    expect(result.stdout).toContain("branch:     feature/demo");
+    expect(result.stdout).not.toContain("repo_demo_replace_me");
+    expect(JSON.parse(await readFile(join(dir, "nested", ".wenvy", "config.json"), "utf8"))).toEqual({
+      remoteUrl: "https://api.wenvy.dev",
+      repo: "git_ACM-VIT_ExamCooker-2024",
+      branch: "feature/demo"
+    });
+  });
+
+  it("doctor falls back to git repo detection when config still has the old placeholder repo", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wenvy-cli-git-"));
+    runGit(["init", "-b", "main"], dir);
+    runGit(["remote", "add", "origin", "https://github.com/ACM-VIT/ExamCooker-2024.git"], dir);
+    mkdirSync(join(dir, ".wenvy"), { recursive: true });
+    await writeFile(
+      join(dir, ".wenvy", "config.json"),
+      JSON.stringify(
+        {
+          remoteUrl: "https://api.wenvy.dev",
+          repo: "repo_demo_replace_me",
+          branch: "main"
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const result = spawnSync("pnpm", ["exec", "tsx", cliPath, "doctor", "--skip-network"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        WENVY_PROJECT_DIR: dir,
+        WENVY_TOKEN: "cli-test-token"
+      }
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("[ok] repo: git_ACM-VIT_ExamCooker-2024 (detected from git)");
+    expect(result.stdout).not.toContain("repo missing");
+    expect(result.stdout).toContain("Ready.");
+  });
+
   it("checks project readiness without requiring network when skipped", async () => {
     const dir = await mkdtemp(join(tmpdir(), "wenvy-cli-"));
     await spawnInitForProjectDir(dir);
@@ -72,6 +139,21 @@ describe("terminal CLI regression", () => {
     expect(result.stdout).toContain("[ok] token: WENVY_TOKEN is set");
     expect(result.stdout).toContain("[skip] remote health");
     expect(result.stdout).toContain("Ready.");
+  });
+
+  it("prints demo endpoints that match the deployed dashboard and API", async () => {
+    const result = spawnSync("pnpm", ["exec", "tsx", cliPath, "demo"], {
+      cwd: process.cwd(),
+      encoding: "utf8"
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("npm install -g wenvy");
+    expect(result.stdout).toContain("https://api.wenvy.dev/health");
+    expect(result.stdout).toContain("https://api.wenvy.dev/openapi.json");
+    expect(result.stdout).toContain("https://dash.wenvy.dev");
+    expect(result.stdout).toContain("https://wenvy.dev");
   });
 
   it("prints canonical snapshot bytes without extra terminal output", async () => {
@@ -390,6 +472,16 @@ async function spawnInitForProjectDir(dir: string): Promise<void> {
   });
   if (result.status !== 0) {
     throw new Error(result.stderr || result.stdout || "wenvy init failed");
+  }
+}
+
+function runGit(args: readonly string[], cwd: string): void {
+  const result = spawnSync("git", [...args], {
+    cwd,
+    encoding: "utf8"
+  });
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `git ${args.join(" ")} failed`);
   }
 }
 

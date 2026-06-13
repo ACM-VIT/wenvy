@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Command } from "commander";
 import type { PullRequest, PushCommitRequest, PushIntentRequest } from "@wenvy/contracts";
 import {
@@ -14,6 +15,8 @@ import {
 
 const cliVersion = "0.1.1";
 const defaultRemoteUrl = "https://api.wenvy.dev";
+const dashboardUrl = "https://dash.wenvy.dev";
+const landingUrl = "https://wenvy.dev";
 const defaultBranch = "main";
 const configDirectoryName = ".wenvy";
 const configFileName = "config.json";
@@ -54,22 +57,23 @@ program
   .description("Create a local .wenvy config for this project")
   .option("--remote-url <url>", "Worker API URL", defaultRemoteUrl)
   .option("--repo <repo>", "Wenvy repo ID")
-  .option("--branch <branch>", "Default branch", defaultBranch)
+  .option("--branch <branch>", "Default branch")
   .option("--force", "Overwrite an existing .wenvy/config.json")
   .action(
     async (options: {
       readonly remoteUrl: string;
       readonly repo?: string;
-      readonly branch: string;
+      readonly branch?: string;
       readonly force?: boolean;
     }) => {
+      const detected = detectGitProjectDefaults();
       const config: WenvyProjectConfig = {
         remoteUrl: normalizeRemoteUrl(options.remoteUrl),
-        repo: options.repo ?? "repo_demo_replace_me",
-        branch: options.branch
+        repo: options.repo ?? detected.repo ?? "repo_demo_replace_me",
+        branch: options.branch ?? detected.branch ?? defaultBranch
       };
       await writeProjectConfig(config, options.force === true);
-      process.stdout.write(formatInitOutput(config));
+      process.stdout.write(formatInitOutput(config, detected));
     }
   );
 
@@ -333,12 +337,19 @@ function formatBanner(): string {
     "  $ wenvy push snapshot.enc          Push encrypted snapshot bytes",
     "  $ wenvy pull --output-file out.enc Pull encrypted snapshot bytes",
     "",
+    `Dashboard: ${dashboardUrl}`,
     "Try: wenvy demo",
     ""
   ].join("\n");
 }
 
-function formatInitOutput(config: WenvyProjectConfig): string {
+interface DetectedGitProjectDefaults {
+  readonly repo?: string;
+  readonly branch?: string;
+  readonly remote?: string;
+}
+
+function formatInitOutput(config: WenvyProjectConfig, detected: DetectedGitProjectDefaults = {}): string {
   const repoLine =
     config.repo === "repo_demo_replace_me"
       ? "  1. Edit .wenvy/config.json and replace repo_demo_replace_me"
@@ -350,7 +361,7 @@ function formatInitOutput(config: WenvyProjectConfig): string {
   const doctorLine = config.repo === "repo_demo_replace_me" ? "  3. Run: wenvy doctor" : "  2. Run: wenvy doctor";
   const demoLine = config.repo === "repo_demo_replace_me" ? "  4. Run: wenvy demo" : "  3. Run: wenvy demo";
 
-  return [
+  const lines = [
     "Initialized Wenvy project",
     "",
     "Created:",
@@ -361,14 +372,110 @@ function formatInitOutput(config: WenvyProjectConfig): string {
     `  remoteUrl: ${config.remoteUrl}`,
     `  repo:      ${config.repo}`,
     `  branch:    ${config.branch}`,
-    "",
+    ""
+  ];
+
+  if (detected.repo || detected.branch || detected.remote) {
+    lines.push("Detected:");
+    if (detected.remote) {
+      lines.push(`  git remote: ${detected.remote}`);
+    }
+    if (detected.repo) {
+      lines.push(`  repo id:    ${detected.repo}`);
+    }
+    if (detected.branch) {
+      lines.push(`  branch:     ${detected.branch}`);
+    }
+    lines.push("");
+  }
+
+  lines.push(
     "Next steps:",
     repoLine,
     tokenLine,
     doctorLine,
     demoLine,
     ""
-  ].join("\n");
+  );
+  return lines.join("\n");
+}
+
+function detectGitProjectDefaults(): DetectedGitProjectDefaults {
+  const root = runGit(["rev-parse", "--show-toplevel"]);
+  if (!root) {
+    return {};
+  }
+  const remote = runGit(["remote", "get-url", "origin"]);
+  const branch = runGit(["branch", "--show-current"]);
+  return {
+    repo: deriveRepoIdFromRemote(remote) ?? deriveRepoIdFromDirectory(root),
+    ...(branch ? { branch } : {}),
+    ...(remote ? { remote } : {})
+  };
+}
+
+function runGit(args: readonly string[]): string | undefined {
+  const result = spawnSync("git", [...args], {
+    cwd: projectRoot(),
+    encoding: "utf8"
+  });
+  if (result.status !== 0) {
+    return undefined;
+  }
+  const output = result.stdout.trim();
+  return output.length > 0 ? output : undefined;
+}
+
+function deriveRepoIdFromRemote(remote: string | undefined): string | undefined {
+  if (!remote) {
+    return undefined;
+  }
+
+  const cleaned = remote.replace(/\.git$/u, "");
+  const sshMatch = cleaned.match(/^[^@]+@[^:]+:(?<owner>[^/]+)\/(?<repo>[^/]+)$/u);
+  if (sshMatch?.groups) {
+    const owner = sshMatch.groups.owner;
+    const repo = sshMatch.groups.repo;
+    if (owner && repo) {
+      return formatGitRepoId(owner, repo);
+    }
+  }
+
+  try {
+    const parsed = new URL(cleaned);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const repo = segments.at(-1);
+    const owner = segments.at(-2);
+    if (owner && repo) {
+      return formatGitRepoId(owner, repo);
+    }
+  } catch {
+    const segments = cleaned.split("/").filter(Boolean);
+    const repo = segments.at(-1);
+    const owner = segments.at(-2);
+    if (owner && repo) {
+      return formatGitRepoId(owner, repo);
+    }
+  }
+
+  return undefined;
+}
+
+function deriveRepoIdFromDirectory(root: string): string {
+  return `git_${sanitizeRepoIdSegment(basename(root))}`;
+}
+
+function formatGitRepoId(owner: string, repo: string): string {
+  return `git_${sanitizeRepoIdSegment(owner)}_${sanitizeRepoIdSegment(repo)}`;
+}
+
+function sanitizeRepoIdSegment(value: string): string {
+  const sanitized = value
+    .trim()
+    .replace(/\.git$/u, "")
+    .replace(/[^A-Za-z0-9_-]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+  return sanitized || "repo";
 }
 
 async function formatDemoOutput(): Promise<string> {
@@ -405,6 +512,8 @@ async function formatDemoOutput(): Promise<string> {
     "Live endpoints:",
     `   ${remoteUrl}/health`,
     `   ${remoteUrl}/openapi.json`,
+    `   ${dashboardUrl}`,
+    `   ${landingUrl}`,
     ""
   ].join("\n");
 }
@@ -427,6 +536,7 @@ async function runDoctor(options: ConnectionOptions & { readonly skipNetwork?: b
   const lines = ["Wenvy doctor", ""];
   let ok = true;
   const config = await readProjectConfig();
+  const detected = detectGitProjectDefaults();
   const token = options.token ?? process.env.WENVY_TOKEN;
 
   if (config) {
@@ -437,14 +547,15 @@ async function runDoctor(options: ConnectionOptions & { readonly skipNetwork?: b
   }
 
   const remoteUrl = normalizeRemoteUrl(options.remoteUrl ?? config?.remoteUrl ?? defaultRemoteUrl);
-  const repo = options.repo ?? config?.repo;
-  const branch = options.branch ?? config?.branch ?? defaultBranch;
+  const repo = resolveRepoOption(options.repo, config, detected);
+  const branch = options.branch ?? config?.branch ?? detected.branch ?? defaultBranch;
 
   if (repo && repo !== "repo_demo_replace_me") {
-    lines.push(`[ok] repo: ${repo}`);
+    const source = config?.repo === "repo_demo_replace_me" && detected.repo === repo ? "detected from git" : "configured";
+    lines.push(`[ok] repo: ${repo} (${source})`);
   } else {
     ok = false;
-    lines.push("[fail] repo missing: pass --repo or edit .wenvy/config.json");
+    lines.push("[fail] repo missing: run this inside a git repo, or pass --repo <repo-id>");
   }
   lines.push(`[ok] branch: ${branch}`);
 
@@ -492,9 +603,10 @@ async function resolveConnectionOptions(options: ConnectionOptions): Promise<{
   readonly token: string;
 }> {
   const config = await readProjectConfig();
+  const detected = detectGitProjectDefaults();
   const remoteUrl = normalizeRemoteUrl(options.remoteUrl ?? config?.remoteUrl ?? defaultRemoteUrl);
-  const repo = options.repo ?? config?.repo;
-  const branch = options.branch ?? config?.branch ?? defaultBranch;
+  const repo = resolveRepoOption(options.repo, config, detected);
+  const branch = options.branch ?? config?.branch ?? detected.branch ?? defaultBranch;
 
   if (!repo || repo === "repo_demo_replace_me") {
     throw new Error("repo is required; run wenvy init --repo <repo-id> or pass --repo");
@@ -506,6 +618,20 @@ async function resolveConnectionOptions(options: ConnectionOptions): Promise<{
     branch,
     token: readAuthToken(options.token)
   };
+}
+
+function resolveRepoOption(
+  repoOverride: string | undefined,
+  config: WenvyProjectConfig | undefined,
+  detected: DetectedGitProjectDefaults
+): string | undefined {
+  if (repoOverride) {
+    return repoOverride;
+  }
+  if (config?.repo && config.repo !== "repo_demo_replace_me") {
+    return config.repo;
+  }
+  return detected.repo;
 }
 
 async function readProjectConfig(): Promise<WenvyProjectConfig | undefined> {
