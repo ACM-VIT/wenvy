@@ -8,9 +8,15 @@ export interface GithubSyncMessage {
 export interface AuditEventMessage {
   readonly action: string;
   readonly result: "success" | "denied" | "failed";
-  readonly actorType: "user" | "service-account" | "system";
+  readonly actorType: "user" | "service-account" | "github-app" | "system";
+  readonly organizationId?: string;
+  readonly actorUserId?: string;
+  readonly actorServiceAccountId?: string;
   readonly targetType: string;
   readonly targetId: string;
+  readonly ipAddress?: string;
+  readonly userAgent?: string;
+  readonly metadata?: Record<string, unknown>;
   readonly occurredAt: string;
 }
 

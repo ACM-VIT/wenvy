@@ -75,7 +75,7 @@ export function createHonoApp(): Hono<AppBindings> {
     const id = context.env.REPO_BRANCH_COORDINATOR.idFromName(`${repoId}:${branch}`);
     const stub = context.env.REPO_BRANCH_COORDINATOR.get(id);
 
-    return stub.fetch("https://repo-branch-coordinator/finalize-push", {
+    const response = await stub.fetch("https://repo-branch-coordinator/finalize-push", {
       method: "POST",
       body: JSON.stringify({
         expectedHead: input.expectedHead,
@@ -90,6 +90,34 @@ export function createHonoApp(): Hono<AppBindings> {
         createdAt: input.createdAt ?? new Date().toISOString()
       })
     });
+
+    if (response.ok) {
+      const decision = (await response.clone().json()) as {
+        readonly status?: string;
+        readonly commit?: string;
+        readonly headCommit?: string;
+      };
+      if (decision.status === "committed" && decision.commit) {
+        await context.env.AUDIT_QUEUE.send({
+          action: "branch.push.committed",
+          actorType: "system",
+          result: "success",
+          targetType: "repo-branch",
+          targetId: `${repoId}:${branch}`,
+          metadata: {
+            repoId,
+            branch,
+            commit: decision.commit,
+            headCommit: decision.headCommit ?? decision.commit,
+            ciphertextSha256: input.ciphertextSha256,
+            repoKeyVersion: input.repoKeyVersion
+          },
+          occurredAt: new Date().toISOString()
+        });
+      }
+    }
+
+    return response;
   });
 
   app.post("/v1/repos/:repoId/branches/:branch/pull", async (context) => {

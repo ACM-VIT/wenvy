@@ -117,7 +117,11 @@ describe("Hono route regression", () => {
     const env = fakeEnv({
       repoBranchFetch: async (request) => {
         forwardedRequests.push(request.clone());
-        return Response.json({ status: "committed", headCommit: "commit_01JY7X0WENVYAAA" });
+        return Response.json({
+          status: "committed",
+          commit: "commit_01JY7X0WENVYAAA",
+          headCommit: "commit_01JY7X0WENVYAAA"
+        });
       }
     });
 
@@ -150,6 +154,23 @@ describe("Hono route regression", () => {
       parentCommit: null,
       objectKey: "snapshots/opaque-object-key"
     });
+    expect(env.AUDIT_QUEUE.send).toHaveBeenCalledOnce();
+    expect(env.AUDIT_QUEUE.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "branch.push.committed",
+        actorType: "system",
+        result: "success",
+        targetType: "repo-branch",
+        targetId: "repo_01JY7X0WENVYAAA:main",
+        metadata: expect.objectContaining({
+          repoId: "repo_01JY7X0WENVYAAA",
+          branch: "main",
+          commit: "commit_01JY7X0WENVYAAA",
+          ciphertextSha256: "a".repeat(64),
+          repoKeyVersion: 1
+        })
+      })
+    );
   });
 
   it("forwards pull requests to the branch coordinator", async () => {

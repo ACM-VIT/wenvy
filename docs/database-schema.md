@@ -657,6 +657,8 @@ Key fields:
 - `metadata` (JSONB, optional structured context for the action)
 - `created_at`
 
+Note: Worker queue messages use kebab-case actor strings (`service-account`, `github-app`), and the Postgres adapter normalizes them to the snake_case `actor_type` values stored here.
+
 Recommended indexes:
 - (`organization_id`, `created_at` DESC) for org-scoped audit queries
 - (`actor_user_id`, `created_at` DESC) for per-user audit trail

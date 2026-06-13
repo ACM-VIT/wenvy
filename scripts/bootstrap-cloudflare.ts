@@ -41,7 +41,7 @@ interface WranglerConfig {
 
 type PlannedCommand = readonly [command: string, args: readonly string[]];
 
-const configPath = "wrangler.jsonc";
+const configPath = process.env.WENVY_WRANGLER_CONFIG ?? "wrangler.jsonc";
 const apply = process.argv.includes("--apply");
 const preflight = process.argv.includes("--preflight");
 
@@ -74,6 +74,11 @@ function main(): void {
       process.stdout.write(`- ${placeholder}\n`);
     }
     process.stdout.write("\n");
+  }
+
+  if (apply && unresolved.length > 0) {
+    process.stdout.write("Refusing to apply until Wrangler placeholders are resolved.\n");
+    process.exit(1);
   }
 
   if (!apply) {
