@@ -99,24 +99,20 @@ The implementation should not add a non-TypeScript gateway. Keep the MVP Worker-
 
 1. `app.wenvy.dev`
    - Worker with Static Assets for the dashboard.
-   - Hono API routes under `/api`.
+   - Hono HTTP routes under versioned paths such as `/v1`.
    - Bindings: Hyperdrive, R2, Queues, Durable Objects, Secrets Store, Analytics Engine.
 
-2. `api.wenvy.dev`
-   - Optional separate Worker if API isolation is preferred.
-   - Same bindings as dashboard, but no static asset serving.
-
-3. `ssh.wenvy.dev` (optional)
+2. `ssh.wenvy.dev` (optional)
    - TypeScript Node SSH compatibility origin.
    - Published through Cloudflare Tunnel or Spectrum for public L4 edge.
    - Talks to the Worker HTTP control plane for authz decisions or directly to Postgres/R2 if latency requires it.
 
-4. Background processing
+3. Background processing
    - Queue consumers for email, audit fanout, GitHub sync, and checks.
    - Workflows for team/repo key rotation.
    - Cron Triggers to enqueue periodic consistency checks.
 
-5. Data
+4. Data
    - Managed Postgres as source of truth.
    - Hyperdrive between Workers and Postgres.
    - R2 for ciphertext blobs and exported logs.
