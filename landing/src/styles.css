@@ -61,13 +61,9 @@ code{ font-family:var(--f-mono); font-size:.92em; }
   justify-self:start;
   font-family:var(--f-disp); font-weight:900; font-size:25px;
   letter-spacing:.04em; color:var(--paper); text-decoration:none;
-  display:inline-flex; align-items:center;
+  display:inline-flex; align-items:center; gap:10px;
 }
-/* terminal-cursor brand mark */
-.mast__cursor{
-  display:inline-block; width:11px; height:.82em; margin-left:5px;
-  background:var(--vermillion); transform:translateY(1px);
-}
+.mast__logo{ width:30px; height:30px; flex:0 0 auto; }
 .mast__nav{
   justify-self:center; display:flex; gap:30px;
   font-size:12px; letter-spacing:.08em; text-transform:lowercase;
@@ -352,7 +348,8 @@ code{ font-family:var(--f-mono); font-size:.92em; }
   display:flex; flex-wrap:wrap; gap:16px 40px; align-items:center; justify-content:space-between;
   padding:34px var(--edge); font-family:var(--f-mono); font-size:12.5px; letter-spacing:.03em;
 }
-.foot__mark{ font-family:var(--f-disp); font-weight:900; font-size:20px; letter-spacing:.02em; }
+.foot__mark{ display:inline-flex; align-items:center; gap:9px; font-family:var(--f-disp); font-weight:900; font-size:20px; letter-spacing:.02em; }
+.foot__logo{ width:24px; height:24px; flex:0 0 auto; color:var(--vermillion); }
 .foot__team{ opacity:.7; flex:1 1 auto; text-align:center; }
 .foot__note{ color:var(--vermillion); }
 
