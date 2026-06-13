@@ -3,7 +3,7 @@ import { useInView } from 'framer-motion'
 
 type Seg = readonly [string, string]
 
-// [text, className]  — className '' renders as plain text
+// [text, className]  ·  className '' renders as plain text
 const SCRIPT: Seg[] = [
   ['$ ', 'dim'], ['wenvy push ', 'p'], ['api-keys production\n', 'hl'],
   ['  resolving envelope chain  ssh → team → repo …\n', 'dim'],
@@ -14,7 +14,7 @@ const SCRIPT: Seg[] = [
   ['✓ ', 'ok'], ['production', 'hl'], [' ← commit ', ''], ['4e9a', 'p'],
   ['  signed ed25519 a1:b2:…\n', 'dim'],
   ['\n$ ', 'dim'], ['wenvy pull ', 'p'], ['api-keys dev\n', 'hl'],
-  ['✓ ', 'ok'], ['decrypted locally — ', ''], ['plaintext never touched the server', 'hl'], ['\n', ''],
+  ['✓ ', 'ok'], ['decrypted locally · ', ''], ['plaintext never touched the server', 'hl'], ['\n', ''],
 ]
 
 export function Terminal() {
