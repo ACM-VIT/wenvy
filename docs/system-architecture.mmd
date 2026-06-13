@@ -1,114 +1,121 @@
-graph TB
-    subgraph "Client Layer"
-        CLI[CLI Client<br/>- Encrypt/decrypt locally<br/>- Sign commits<br/>- Merge conflicts]
-        WebUI[Web Browser<br/>- Email auth<br/>- Team management<br/>- Audit reports]
-        CICD[CI/CD Pipeline<br/>- Scoped API tokens<br/>- Branch allow-lists]
-        GitHub[GitHub App<br/>- Org/team membership<br/>- Signed webhooks<br/>- Read-only Members permission]
+flowchart LR
+    %% Wenvy current architecture snapshot.
+    %% Secret plaintext is intentionally present only on trusted client devices.
+
+    subgraph Client["Trusted client boundary"]
+        Terminal["Developer device<br/>Wenvy terminal client<br/>Local .wenvy metadata"]
+        Browser["Web browser<br/>Governance dashboard"]
+        CI["CI/CD runner<br/>Scoped service token<br/>Machine key pair"]
     end
 
-    subgraph "Cloudflare Edge"
-        Edge[DNS + TLS<br/>WAF / Rate Limiting<br/>Turnstile]
-        Access[Cloudflare Access<br/>Internal and staging apps]
-        APIShield[API Shield<br/>Schema validation / optional mTLS]
+    subgraph External["External identity and delivery systems"]
+        Email["Email provider<br/>Magic links and invites"]
+        GitHub["GitHub App<br/>Read-only org/team membership<br/>Signed webhooks"]
     end
 
-    subgraph "Cloudflare Workers Platform"
-        AppWorker[Dashboard + API Worker<br/>Static Assets + Hono<br/>OpenAPI contracts]
-        QueueWorkers[Queue Consumers<br/>Email retries<br/>Audit fanout<br/>GitHub sync<br/>Envelope checks]
-        RotationWF[Workflows<br/>Rotation saga<br/>Checkpointed retries]
-        BranchDO[Durable Objects<br/>Branch write serialization<br/>Single-use tokens<br/>Rate counters]
-        KV[Workers KV<br/>Read-mostly config cache]
+    subgraph Edge["Cloudflare edge"]
+        HTTP_Edge["HTTPS edge<br/>DNS, TLS, WAF<br/>Rate limiting, Turnstile"]
+        SSH_Edge["Optional SSH TCP edge<br/>Cloudflare Tunnel or Spectrum<br/>Compatibility path only"]
+        Shield["Optional enterprise controls<br/>API Shield, mTLS<br/>Cloudflare Access"]
     end
 
-    subgraph "Terminal Data Plane"
-        TerminalApi[Worker HTTPS Routes<br/>- Authenticate terminal client<br/>- Authorize commands<br/>- Push / pull / share<br/>- Issue bridge tokens]
-        Tunnel[Optional Tunnel / Spectrum<br/>TCP edge for SSH compatibility]
-        SSH[Optional TypeScript Node SSH Service<br/>- Authenticate SSH keys<br/>- Translate to Worker commands]
+    subgraph Control["Cloudflare Worker control plane"]
+        Worker["Dashboard + API Worker<br/>React/Vite static assets<br/>Hono API routes<br/>OpenAPI 3.1 contract"]
+        TerminalAPI["Terminal HTTPS routes<br/>Authenticate terminal client<br/>Authorize push, pull, share<br/>Issue bridge tokens"]
+        AuthDO["AuthTokenCoordinator DO<br/>Single-use magic links<br/>Single-use terminal bridge tokens"]
+        BranchDO["RepoBranchCoordinator DO<br/>Per-repo/branch write locks<br/>Idempotency and rate counters"]
+        KV["Workers KV<br/>Read-mostly non-authoritative config"]
     end
 
-    subgraph "State Layer"
-        Hyperdrive[Hyperdrive<br/>Postgres connection pooling]
-        PG[(Managed Postgres<br/>- Identity/auth<br/>- RBAC relations<br/>- Branch policies<br/>- Crypto metadata<br/>- Commits/branches<br/>- Audit events)]
-        R2[(Cloudflare R2<br/>Encrypted snapshots only<br/>Log exports)]
+    subgraph OptionalSSH["Optional SSH compatibility data plane"]
+        SSH["TypeScript Node SSH service<br/>SSH key authentication<br/>Translate SSH frames<br/>Call Worker terminal routes"]
     end
 
-    subgraph "Security Material"
-        Secrets[Cloudflare Secrets Store<br/>Provider credentials<br/>Non-secret-data signing keys]
+    subgraph AuthzPlane["Shared authorization plane"]
+        Authz["Shared authorization logic<br/>Org/team role<br/>Repo permission<br/>Branch policy<br/>Deny wins"]
     end
 
-    subgraph "Trust Boundaries"
-        TB1[Trusted: User device + private keys]
-        TB2[Semi-trusted: Server control plane]
-        TB3[Untrusted: Network + storage dumps]
+    subgraph Async["Async and scheduled work"]
+        Queues["Cloudflare Queues<br/>email, audit-events<br/>github-sync, envelope-checks"]
+        Workflows["Cloudflare Workflows<br/>Rotation saga<br/>Checkpointed retries"]
+        Cron["Cron Triggers<br/>Full GitHub reconcile<br/>Consistency checks<br/>Retention sweeps"]
     end
 
-    WebUI -->|HTTPS| Edge
-    CICD -->|HTTPS bearer token| Edge
-    GitHub -->|HTTPS webhooks| Edge
-    CLI -->|HTTPS| Edge
-    CLI -.->|Optional SSH| Tunnel
-
-    Edge --> AppWorker
-    Edge -.-> Access
-    Edge -.-> APIShield
-    Tunnel -.-> SSH
-    SSH -.-> TerminalApi
-
-    AppWorker --> BranchDO
-    AppWorker --> Hyperdrive
-    AppWorker --> R2
-    AppWorker --> KV
-    AppWorker --> QueueWorkers
-    AppWorker --> RotationWF
-    QueueWorkers --> Hyperdrive
-    QueueWorkers -->|Installation token reconciliation| GitHub
-    QueueWorkers --> R2
-    RotationWF --> BranchDO
-    RotationWF --> Hyperdrive
-    RotationWF --> R2
-
-    TerminalApi --> BranchDO
-    TerminalApi --> Hyperdrive
-    TerminalApi --> R2
-    TerminalApi --> AppWorker
-
-    Hyperdrive --> PG
-    AppWorker -.-> Secrets
-    QueueWorkers -.-> Secrets
-    RotationWF -.-> Secrets
-
-    CLI -.->|Plaintext exists only here| TB1
-    AppWorker -.->|Metadata only| TB2
-    TerminalApi -.->|Metadata + ciphertext only| TB2
-    R2 -.->|Ciphertext objects| TB3
-    PG -.->|No plaintext secrets| TB3
-
-    subgraph "Branch Access Control"
-        B1[1. Validate identity]
-        B2[2. Check org/team membership]
-        B3[3. Check repo permission]
-        B4[4. Match branch policy]
-        B5[5. Serialize branch update in Durable Object]
-        B6[6. Persist audit and branch state]
-
-        B1 --> B2 --> B3 --> B4 --> B5 --> B6
+    subgraph State["Server-side state boundary"]
+        Hyperdrive["Hyperdrive<br/>Postgres pooling/cache"]
+        Postgres[("Managed Postgres<br/>Identities and sessions<br/>RBAC and GitHub mappings<br/>Branch policies and heads<br/>Envelope metadata<br/>Commit metadata<br/>Immutable audit events")]
+        R2[("Cloudflare R2<br/>Encrypted snapshots only<br/>Opaque object names<br/>Optional log exports")]
+        Secrets["Secrets Store / Worker secrets<br/>Provider credentials<br/>Webhook secrets<br/>Metadata signing keys"]
     end
 
-    AppWorker -.->|Evaluates| B1
-    TerminalApi -.->|Evaluates| B1
-
-    subgraph ".wenvy/ Local Directory"
-        LC[config.json<br/>head.json<br/>branches/<br/>envelopes/<br/>snapshots/<br/>keys/<br/>logs/]
+    subgraph Crypto["Client-side crypto model"]
+        Plaintext["Plaintext env values<br/>exist only in client runtime"]
+        Canonical["Canonical snapshot<br/>Sorted key=value bytes<br/>SHA-256 hash"]
+        Ciphertext["Encrypted snapshot blob<br/>Repo key AEAD encryption"]
+        Envelopes["Envelope chain<br/>SSH or recovery key -> team key<br/>team key -> repo key"]
     end
 
-    CLI -.->|Maintains| LC
+    Terminal -->|"HTTPS push/pull/share"| HTTP_Edge
+    Terminal -.->|"Optional SSH compatibility"| SSH_Edge
+    Terminal -->|"Local encrypt/decrypt"| Plaintext
+    Terminal -->|"Canonicalize"| Canonical
+    Canonical -->|"Encrypt locally"| Ciphertext
+    Terminal -->|"Unwrap locally"| Envelopes
+    Envelopes -->|"Unlocks repo key"| Ciphertext
 
-    classDef trusted fill:#90EE90
-    classDef semiTrusted fill:#FFD700
-    classDef untrusted fill:#FFB6C1
-    classDef encrypted fill:#87CEEB
+    Browser -->|"HTTPS dashboard"| HTTP_Edge
+    CI -->|"HTTPS bearer token"| HTTP_Edge
+    GitHub -->|"Signed webhooks"| HTTP_Edge
+    Worker -->|"Send magic links/invites"| Email
 
-    class TB1 trusted
-    class TB2 semiTrusted
-    class TB3 untrusted
-    class R2 encrypted
+    HTTP_Edge --> Worker
+    HTTP_Edge --> TerminalAPI
+    HTTP_Edge -.-> Shield
+    SSH_Edge -.-> SSH
+    SSH -.->|"Translated commands"| TerminalAPI
+
+    Worker --> AuthDO
+    Worker --> BranchDO
+    Worker --> Authz
+    Worker --> Hyperdrive
+    Worker --> R2
+    Worker --> KV
+    Worker --> Queues
+    Worker --> Workflows
+    Worker -.-> Secrets
+
+    TerminalAPI --> Authz
+    TerminalAPI --> AuthDO
+    TerminalAPI --> BranchDO
+    TerminalAPI --> Hyperdrive
+    TerminalAPI --> R2
+    TerminalAPI --> Worker
+
+    Authz --> Hyperdrive
+    Authz --> BranchDO
+
+    Queues --> Hyperdrive
+    Queues --> R2
+    Queues -->|"Install token, read-only sync"| GitHub
+    Workflows --> BranchDO
+    Workflows --> Hyperdrive
+    Workflows --> R2
+    Cron --> Queues
+
+    Hyperdrive --> Postgres
+    Ciphertext -->|"Upload/download ciphertext only"| R2
+    Envelopes -->|"Envelope metadata only"| Postgres
+
+    classDef trusted fill:#d9f99d,stroke:#3f6212,color:#1a2e05
+    classDef edge fill:#dbeafe,stroke:#1d4ed8,color:#172554
+    classDef control fill:#ede9fe,stroke:#6d28d9,color:#2e1065
+    classDef state fill:#fee2e2,stroke:#b91c1c,color:#450a0a
+    classDef crypto fill:#ccfbf1,stroke:#0f766e,color:#042f2e
+    classDef external fill:#fef3c7,stroke:#b45309,color:#451a03
+
+    class Terminal,Browser,CI trusted
+    class HTTP_Edge,SSH_Edge,Shield edge
+    class Worker,TerminalAPI,AuthDO,BranchDO,KV,SSH,Authz,Queues,Workflows,Cron control
+    class Hyperdrive,Postgres,R2,Secrets state
+    class Plaintext,Canonical,Ciphertext,Envelopes crypto
+    class Email,GitHub external
