@@ -10,12 +10,32 @@ const LINKS: [string, string][] = [
 
 export function Masthead() {
   const [scrolled, setScrolled] = useState(false)
+  const [active, setActive] = useState<string>('')
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 60)
     onScroll()
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  // scroll-spy: highlight the section currently in view
+  useEffect(() => {
+    const sections = LINKS
+      .map(([href]) => document.getElementById(href.slice(1)))
+      .filter((el): el is HTMLElement => !!el)
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+        if (visible) setActive('#' + visible.target.id)
+      },
+      { rootMargin: '-45% 0px -50% 0px', threshold: [0, 0.25, 0.5] },
+    )
+    sections.forEach((s) => io.observe(s))
+    return () => io.disconnect()
   }, [])
 
   return (
@@ -29,10 +49,14 @@ export function Masthead() {
       }}
     >
       <a className="mast__mark" href="#top" aria-label="Wenvy home">
-        <span className="seal">家</span> wenvy
+        wenvy<span className="mast__cursor" aria-hidden="true" />
       </a>
       <nav className="mast__nav" aria-label="Primary">
-        {LINKS.map(([href, label]) => <a key={href} href={href}>{label}</a>)}
+        {LINKS.map(([href, label]) => (
+          <a key={href} href={href} className={active === href ? 'is-active' : undefined}>
+            {label}
+          </a>
+        ))}
       </nav>
       <a className="mast__cta" href="https://github.com/ACM-VIT/wenvy" target="_blank" rel="noopener">
         <span className="dot" />source

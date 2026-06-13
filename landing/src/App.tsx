@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { KoiDefs, Koi } from './components/Koi'
+import { Koi } from './components/Koi'
 import { Masthead } from './components/Masthead'
 import { Reveal } from './components/Reveal'
 import { Terminal } from './components/Terminal'
@@ -24,7 +24,6 @@ const lineUp = {
 export default function App() {
   return (
     <>
-      <KoiDefs />
       <Masthead />
 
       {/* ---------- hero ---------- */}
@@ -47,13 +46,13 @@ export default function App() {
           </h1>
 
           <motion.p className="hero__hand" variants={item}>
-            don’t just manage secrets — version them.
+            don’t just manage secrets, version them.
           </motion.p>
 
           <motion.div className="hero__lede" variants={item}>
             <p>
               A <strong>zero-knowledge</strong>, <strong>SSH-first</strong>, end-to-end encrypted platform that syncs your
-              {' '}<code>.env</code> the way Git syncs your code. Plaintext never leaves your machine — the server stores
+              {' '}<code>.env</code> the way Git syncs your code. Plaintext never leaves your machine. The server stores
               only ciphertext it can never read.
             </p>
           </motion.div>
@@ -62,10 +61,6 @@ export default function App() {
             <a className="btn btn--solid" href="#flow">see it push <span aria-hidden="true">→</span></a>
             <a className="btn btn--ghost" href="#model">how the crypto works</a>
           </motion.div>
-
-          <motion.p className="hero__spec" variants={item}>
-            X25519 · XChaCha20-Poly1305 · Ed25519 · SHA-256 · age
-          </motion.p>
         </motion.div>
       </section>
 
@@ -101,8 +96,8 @@ export default function App() {
             </p>
             <dl className="defs">
               <div><dt>Snapshot</dt><dd>Your canonical <code>.env</code>, sealed with a per-repo key using XChaCha20-Poly1305.</dd></div>
-              <div><dt>Repo key</dt><dd>Wrapped by the team key — rotated on revocation, never re-encrypting old blobs.</dd></div>
-              <div><dt>Team key</dt><dd>Wrapped for each member’s SSH key via X25519. Add a device, re-wrap a key — that’s it.</dd></div>
+              <div><dt>Repo key</dt><dd>Wrapped by the team key, rotated on revocation, never re-encrypting old blobs.</dd></div>
+              <div><dt>Team key</dt><dd>Wrapped for each member’s SSH key via X25519. Add a device, re-wrap a key, and that’s it.</dd></div>
               <div><dt>Your SSH key</dt><dd>The root of trust. The private half never leaves your machine.</dd></div>
             </dl>
           </Reveal>
@@ -121,7 +116,7 @@ export default function App() {
           <Reveal className="flow__side" delay={0.1}>
             <p className="lead">
               One canonical format. A signed commit DAG. Branches that map to real environments. Every push is
-              content-addressed by SHA-256, so identical state always hashes identically — no noisy diffs, no blind overwrites.
+              content-addressed by SHA-256, so identical state always hashes identically, with no noisy diffs and no blind overwrites.
             </p>
             <ul className="verbs">
               {verbs.map(([cmd, desc]) => (
@@ -131,7 +126,7 @@ export default function App() {
           </Reveal>
         </div>
         <Reveal className="canon">
-          <p className="canon__label">canonical snapshot — sorted, UTF-8, one trailing newline</p>
+          <p className="canon__label">canonical snapshot · sorted, UTF-8, one trailing newline</p>
           <pre className="canon__body">{`API_KEY=sk-abc123
 DATABASE_URL=postgres://localhost/mydb
 MULTILINE_CERT=b64:LS0tLS1CRUdJTi...`}
@@ -148,9 +143,11 @@ MULTILINE_CERT=b64:LS0tLS1CRUdJTi...`}
         </Reveal>
         <div className="feats">
           {features.map((f, i) => (
-            <Reveal as="article" className="feat" key={f.n} delay={(i % 4) * 0.05}>
-              <span className="feat__n">{f.n}</span>
-              <h3>{f.title}</h3>
+            <Reveal as="article" className="feat" key={f.n} delay={(i % 2) * 0.06}>
+              <div className="feat__top">
+                <span className="feat__n">{f.n}</span>
+                <h3>{f.title}</h3>
+              </div>
               <p>{renderBody(f.body)}</p>
               <span className="feat__tag">{f.tag}</span>
             </Reveal>
@@ -166,7 +163,7 @@ MULTILINE_CERT=b64:LS0tLS1CRUdJTi...`}
         </Reveal>
         <Reveal as="div">
           <p className="govern__lede">
-            Authorization is evaluated in order — identity, membership, repo role, then branch policy. A write only
+            Authorization is evaluated in order: identity, membership, repo role, then branch policy. A write only
             lands when every gate agrees.
           </p>
         </Reveal>
@@ -189,8 +186,8 @@ MULTILINE_CERT=b64:LS0tLS1CRUdJTi...`}
       </section>
 
       <footer className="foot">
-        <span className="foot__mark">家 wenvy</span>
-        <span className="foot__team">Team LXVII — Adheesh Garg · Rishit Shivam · Harshit Narang · Ishaan Samdani · DevSpace 2026</span>
+        <span className="foot__mark">wenvy</span>
+        <span className="foot__team">Team LXVII · Adheesh Garg · Rishit Shivam · Harshit Narang · Ishaan Samdani · DevSpace 2026</span>
         <span className="foot__note">plaintext never leaves your device</span>
       </footer>
     </>

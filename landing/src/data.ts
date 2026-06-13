@@ -14,7 +14,7 @@ export const problems = [
   {
     n: 'iii.',
     title: 'No history, no blame',
-    body: 'Who rotated DATABASE_URL last Tuesday — and to what? Flat files have no commits, no signatures, no audit.',
+    body: 'Who rotated DATABASE_URL last Tuesday, and to what? Flat files have no commits, no signatures, no audit.',
     tag: 'zero provenance',
     code: 'DATABASE_URL',
   },
@@ -36,14 +36,12 @@ export const verbs = [
 ] as const
 
 export const features = [
-  { n: '01', title: 'End-to-end encryption', body: 'Encrypt and decrypt only on the client. The control plane enforces identity and authorization but is cryptographically blind to your plaintext.', tag: 'zero-knowledge' },
-  { n: '02', title: 'SSH-first by design', body: 'Your existing SSH key is your identity and your decryption root. No new passwords, no browser detours for day-to-day work.', tag: 'ed25519 / rsa' },
-  { n: '03', title: 'Branch-based access', body: 'dev, staging and production are first-class policy targets. Unmatched branches fall through to default-deny — never an accident.', tag: 'exact › prefix › *' },
-  { n: '04', title: 'Team RBAC', body: 'Viewer, editor, admin, owner — at org, team and repo scope. Grant a second team read access without cloning a single secret.', tag: '4 roles · multi-team' },
-  { n: '05', title: 'Three-way merges', body: 'Concurrent edits diff key-by-key. Genuine conflicts stop and ask — there is no silent last-write-wins for your production database URL.', tag: 'no blind overwrite' },
-  { n: '06', title: 'Rotation & recovery', body: 'Revoke a member and roll the team key as a checkpointed saga. Lost every device? A BIP39 recovery key brings you back without an admin.', tag: 'saga · bip39' },
-  { n: '07', title: 'CI/CD service accounts', body: 'Scoped bearer tokens with explicit branch allow-lists and pull-only capability. Pipelines pull production without ever touching governance.', tag: 'scoped tokens' },
-  { n: '08', title: 'Immutable audit', body: 'Every login, share, rotation and denied write is an append-only event — attributable to a user or a service account, queryable forever.', tag: 'append-only' },
+  { n: '01', title: 'End-to-end encryption', body: 'Encrypt and decrypt only on the client. The server enforces access but is cryptographically blind to your plaintext.', tag: 'zero-knowledge' },
+  { n: '02', title: 'SSH-first by design', body: 'Your existing SSH key is your identity and your decryption root. No new passwords, no browser detours.', tag: 'ed25519 / rsa' },
+  { n: '03', title: 'Branch-based access', body: 'dev, staging and production are first-class policy targets. Unmatched branches fall through to default-deny.', tag: 'exact › prefix › *' },
+  { n: '04', title: 'Team RBAC', body: 'Viewer, editor, admin, owner at org, team and repo scope. Share a repo with a second team without cloning a secret.', tag: '4 roles · multi-team' },
+  { n: '05', title: 'Rotation & recovery', body: 'Revoke a member and roll the team key as a checkpointed saga. A BIP39 recovery key brings you back without an admin.', tag: 'saga · bip39' },
+  { n: '06', title: 'Immutable audit', body: 'Every login, share, rotation and denied write is an append-only event, attributable to a user or service account.', tag: 'append-only' },
 ] as const
 
 export const stages = [
