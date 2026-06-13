@@ -1,40 +1,27 @@
-import { useState } from 'react'
-import { AUDIT, FILTERS, type AuditResult } from '../data'
+import type { ApiStatusState } from "../use-api-status";
 
-export function Audit() {
-  const [filter, setFilter] = useState<'all' | AuditResult>('all')
-  const rows = AUDIT.filter((e) => filter === 'all' || e.res === filter)
-
+export function Audit({ api }: { readonly api: ApiStatusState }) {
   return (
     <>
       <div className="vhead">
         <h1>Audit ledger</h1>
-        <p>Append-only. Attributable to a user or a service account. Metadata only, never a secret value.</p>
+        <p>The Worker writes audit events for protected actions, but the public API does not expose an audit feed yet.</p>
       </div>
 
-      <div className="filters">
-        {FILTERS.map(({ f, label }) => (
-          <button
-            key={f}
-            className={`chip${filter === f ? ' is-on' : ''}`}
-            onClick={() => setFilter(f)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <table className="grid grid--head">
+        <thead><tr><th>source</th><th>current API support</th><th>dashboard behavior</th><th>status</th></tr></thead>
+        <tbody>
+          <tr><td className="b">push commit</td><td className="mono">audit queue send on success</td><td className="mono dim">not listed until read endpoint exists</td><td><span className="st st--warn">write-only</span></td></tr>
+          <tr><td className="b">pull snapshot</td><td className="mono">audit queue send on success</td><td className="mono dim">not listed until read endpoint exists</td><td><span className="st st--warn">write-only</span></td></tr>
+          <tr><td className="b">denied access</td><td className="mono">audit queue send on denial</td><td className="mono dim">not listed until read endpoint exists</td><td><span className="st st--warn">write-only</span></td></tr>
+          <tr><td className="b">API document</td><td className="mono">{api.status === "online" ? `${api.openApi.pathCount} routes` : "checking"}</td><td className="mono dim">shown live across dashboard</td><td><span className={`st ${api.status === "online" ? "st--on" : "st--warn"}`}>{api.status}</span></td></tr>
+        </tbody>
+      </table>
 
-      <ol className="audit">
-        {rows.map((e, i) => (
-          <li key={`${e.t}-${i}`}>
-            <span className="audit__t">{e.t}</span>
-            <span className={`audit__res res-${e.res}`}>{e.res}</span>
-            {/* msg is trusted, static, internal copy, not user input */}
-            <span className="audit__msg" dangerouslySetInnerHTML={{ __html: e.msg }} />
-            <span className={`audit__actor${e.svc ? ' svc' : ''}`}>{e.actor}</span>
-          </li>
-        ))}
-      </ol>
+      <div className="invariant">
+        <span className="invariant__tick">✓</span>
+        <p><b>No fake audit log.</b> This page now reflects the real backend boundary instead of showing invented user activity.</p>
+      </div>
     </>
   )
 }

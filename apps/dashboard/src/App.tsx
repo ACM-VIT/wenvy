@@ -10,8 +10,13 @@ import { Rotations } from './views/Rotations'
 import { Service } from './views/Service'
 import { Audit } from './views/Audit'
 import type { ViewId } from './data'
+import { useApiStatus, type ApiStatusState } from './use-api-status'
 
-const VIEWS: Record<ViewId, () => JSX.Element> = {
+interface ViewProps {
+  readonly api: ApiStatusState
+}
+
+const VIEWS: Record<ViewId, (props: ViewProps) => JSX.Element> = {
   overview: Overview,
   repos: Repos,
   access: Access,
@@ -23,13 +28,14 @@ const VIEWS: Record<ViewId, () => JSX.Element> = {
 
 export default function App() {
   const [view, setView] = useState<ViewId>('overview')
+  const api = useApiStatus()
   const Active = VIEWS[view]
 
   return (
     <div className="shell">
       <Rail view={view} onNavigate={setView} />
       <main className="main">
-        <Top view={view} />
+        <Top view={view} api={api} />
         <AnimatePresence mode="wait">
           <motion.section
             key={view}
@@ -39,7 +45,7 @@ export default function App() {
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
           >
-            <Active />
+            <Active api={api} />
           </motion.section>
         </AnimatePresence>
       </main>

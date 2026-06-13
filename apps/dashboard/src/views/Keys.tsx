@@ -1,24 +1,24 @@
 export function Keys() {
   return (
     <>
-      <div className="vhead"><h1>SSH keys &amp; devices</h1><p>Every key is an envelope recipient. Revoke one and its envelopes are cut.</p></div>
+      <div className="vhead">
+        <h1>Local snapshot flow</h1>
+        <p>The browser cannot inspect local env files or keys; the CLI owns canonicalization, encryption, push, and pull.</p>
+      </div>
+
       <table className="grid grid--head">
-        <thead><tr><th>fingerprint</th><th>owner</th><th>label</th><th>alg</th><th>last used</th><th>status</th></tr></thead>
+        <thead><tr><th>command</th><th>input</th><th>output</th><th>sync point</th></tr></thead>
         <tbody>
-          <tr><td className="mono">a1:b2:c3:…:9f</td><td className="b">harshit narang</td><td className="mono dim">mbp-16</td><td className="mono">ed25519</td><td className="mono dim">now</td><td><span className="st st--on">active</span></td></tr>
-          <tr><td className="mono">d4:e5:f6:…:21</td><td className="b">harshit narang</td><td className="mono dim">desktop</td><td className="mono">ed25519</td><td className="mono dim">1d</td><td><span className="st st--on">active</span></td></tr>
-          <tr><td className="mono">77:88:99:…:0a</td><td className="b">adheesh garg</td><td className="mono dim">ci-laptop</td><td className="mono">ed25519</td><td className="mono dim">4m</td><td><span className="st st--on">active</span></td></tr>
-          <tr><td className="mono">3c:2b:1a:…:ff</td><td className="b">rishit shivam</td><td className="mono dim">old-air</td><td className="mono">rsa-2048</td><td className="mono dim">31d</td><td><span className="st st--off">revoked</span></td></tr>
+          <tr><td className="b">wenvy snapshot .env</td><td className="mono">plaintext env file</td><td className="mono dim">canonical text + SHA-256</td><td><span className="st st--warn">local only</span></td></tr>
+          <tr><td className="b">wenvy push snapshot.enc</td><td className="mono">encrypted bytes</td><td className="mono dim">commit metadata in Worker</td><td><span className="st st--on">API</span></td></tr>
+          <tr><td className="b">wenvy pull --output-file pulled.enc</td><td className="mono">repo + branch + token</td><td className="mono dim">encrypted bytes from R2</td><td><span className="st st--on">API</span></td></tr>
         </tbody>
       </table>
 
-      <h2 className="sect sect--mt">Web sessions</h2>
-      <table className="grid">
-        <tbody>
-          <tr><td className="b">harshit narang</td><td className="mono dim">magic-link · fingerprint-bound</td><td className="mono">103.21.x.x · chrome/mac</td><td className="mono dim">expires 6h</td><td><span className="st st--on">active</span></td></tr>
-          <tr><td className="b">rishit shivam</td><td className="mono dim">ssh→web bridge · ip-bound</td><td className="mono">49.36.x.x · firefox/linux</td><td className="mono dim">expires 12m</td><td><span className="st st--on">active</span></td></tr>
-        </tbody>
-      </table>
+      <div className="invariant">
+        <span className="invariant__tick">✓</span>
+        <p><b>No fake SSH devices.</b> The dashboard now avoids showing keys or sessions that were not created through the API.</p>
+      </div>
     </>
   )
 }

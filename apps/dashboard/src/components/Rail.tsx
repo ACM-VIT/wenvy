@@ -1,6 +1,7 @@
 import { Koi } from './Koi'
 import { Logo } from './Logo'
 import { NAV, type ViewId } from '../data'
+import { WENVY_API_URL, WENVY_CLI_PACKAGE, WENVY_CLI_VERSION } from '../product'
 
 export function Rail({ view, onNavigate }: { view: ViewId; onNavigate: (v: ViewId) => void }) {
   return (
@@ -14,8 +15,8 @@ export function Rail({ view, onNavigate }: { view: ViewId; onNavigate: (v: ViewI
       </a>
 
       <button className="switcher" aria-label="Switch organization">
-        <span className="switcher__org">acm-vit</span>
-        <span className="switcher__team">core-platform · key v3</span>
+        <span className="switcher__org">live deployment</span>
+        <span className="switcher__team">{WENVY_API_URL.replace("https://", "")}</span>
         <span className="switcher__chev">⌄</span>
       </button>
 
@@ -37,7 +38,7 @@ export function Rail({ view, onNavigate }: { view: ViewId; onNavigate: (v: ViewI
         <Koi className="rail__koi" />
         <div className="who">
           <span className="who__dot" />
-          <div><b>harshit narang</b><span>owner · ed25519 a1:b2</span></div>
+          <div><b>{WENVY_CLI_PACKAGE}@{WENVY_CLI_VERSION}</b><span>npm package in use</span></div>
         </div>
         <p className="rail__creed">plaintext never leaves your device</p>
       </div>

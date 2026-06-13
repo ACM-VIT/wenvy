@@ -1,8 +1,8 @@
 import { CRUMB, type ViewId } from '../data'
-import { useApiStatus } from '../use-api-status'
+import type { ApiStatusState } from '../use-api-status'
+import { WENVY_CLI_PACKAGE, WENVY_CLI_VERSION } from '../product'
 
-export function Top({ view }: { view: ViewId }) {
-  const api = useApiStatus()
+export function Top({ view, api }: { view: ViewId; api: ApiStatusState }) {
   const apiLabel =
     api.status === 'online'
       ? `${api.openApi.pathCount} API routes`
@@ -22,7 +22,7 @@ export function Top({ view }: { view: ViewId }) {
         {apiLabel}
       </a>
       <div className="top__session">
-        <span className="ping ping--ok" />ssh.wenvy.dev
+        <span className="ping ping--ok" />{WENVY_CLI_PACKAGE}@{WENVY_CLI_VERSION}
       </div>
     </header>
   )

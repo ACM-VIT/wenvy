@@ -1,45 +1,58 @@
-export function Overview() {
+import {
+  WENVY_CLI_PACKAGE,
+  WENVY_CLI_VERSION,
+  WENVY_DASHBOARD_URL,
+  WENVY_DEFAULT_BRANCH,
+  WENVY_LANDING_URL
+} from "../product";
+import type { ApiStatusState } from "../use-api-status";
+
+export function Overview({ api }: { readonly api: ApiStatusState }) {
+  const apiRoutes = api.status === "online" ? String(api.openApi.pathCount) : "checking";
+  const apiRuntime = api.status === "online" ? api.health.runtime : "waiting for API";
+  const apiDetail = api.status === "online" ? `${api.openApi.title} ${api.openApi.openapi}` : "live API health";
+
   return (
     <>
       <div className="vhead">
         <h1>Governance at a glance</h1>
-        <p>Everything the control plane can see, and nothing it can decrypt.</p>
+        <p>CLI pushes encrypted snapshots to the Worker API; this console watches the same deployed control plane.</p>
       </div>
 
       <div className="metrics">
-        <div className="metric"><span className="metric__k">push p50</span><span className="metric__v">312<i>ms</i></span><span className="metric__d up">within SLO</span></div>
-        <div className="metric"><span className="metric__k">rotation SLA</span><span className="metric__v">2:41<i>min</i></span><span className="metric__d up">≤ 5:00 target</span></div>
-        <div className="metric"><span className="metric__k">denied writes / 24h</span><span className="metric__v">7</span><span className="metric__d">all on production</span></div>
-        <div className="metric"><span className="metric__k">envelope drift</span><span className="metric__v">0</span><span className="metric__d up">checked 41m ago</span></div>
+        <div className="metric"><span className="metric__k">api routes</span><span className="metric__v">{apiRoutes}</span><span className="metric__d up">{apiDetail}</span></div>
+        <div className="metric"><span className="metric__k">cli package</span><span className="metric__v">{WENVY_CLI_VERSION}</span><span className="metric__d up">npm install -g {WENVY_CLI_PACKAGE}</span></div>
+        <div className="metric"><span className="metric__k">default branch</span><span className="metric__v">{WENVY_DEFAULT_BRANCH}</span><span className="metric__d">matches CLI init fallback</span></div>
+        <div className="metric"><span className="metric__k">runtime</span><span className="metric__v metric__v--text">{apiRuntime}</span><span className="metric__d up">Cloudflare deployment</span></div>
       </div>
 
       <div className="invariant">
         <span className="invariant__tick">✓</span>
-        <p><b>Envelope consistency holds.</b> Every active member and service account has an envelope for team key <code>v3</code>. No envelope references a revoked SSH key. Last sweep 41 minutes ago.</p>
+        <p><b>Demo path is aligned.</b> Use <code>wenvy init</code>, <code>wenvy doctor</code>, <code>wenvy push</code>, and <code>wenvy pull</code> against <code>{api.apiBaseUrl}</code>, then keep this dashboard open at <code>{WENVY_DASHBOARD_URL}</code>.</p>
       </div>
 
       <div className="cols">
         <div className="col">
-          <h2 className="sect">Branch protection</h2>
+          <h2 className="sect">CLI flow</h2>
           <table className="grid">
             <tbody>
-              <tr><td className="b">production</td><td><span className="cls cls--prod">protected</span></td><td className="mono">2 approvals · freeze · no force-push</td><td className="mono dim">owner / admin</td></tr>
-              <tr><td className="b">staging</td><td><span className="cls cls--pre">preproduction</span></td><td className="mono">1 approval on merge</td><td className="mono dim">editor → admin</td></tr>
-              <tr><td className="b">dev</td><td><span className="cls cls--dev">development</span></td><td className="mono">open writes</td><td className="mono dim">editor +</td></tr>
-              <tr><td className="b">release/*</td><td><span className="cls cls--pre">prefix rule</span></td><td className="mono">inherits staging</td><td className="mono dim">admin</td></tr>
-              <tr><td className="b dim">* (fallthrough)</td><td><span className="cls cls--deny">default-deny</span></td><td className="mono">no policy match</td><td className="mono dim">admin / owner only</td></tr>
+              <tr><td className="b">install</td><td><span className="cls cls--dev">npm</span></td><td className="mono">npm install -g {WENVY_CLI_PACKAGE}</td><td className="mono dim">{WENVY_CLI_PACKAGE}@{WENVY_CLI_VERSION}</td></tr>
+              <tr><td className="b">init</td><td><span className="cls cls--pre">config</span></td><td className="mono">wenvy init --branch {WENVY_DEFAULT_BRANCH}</td><td className="mono dim">writes .wenvy/config.json</td></tr>
+              <tr><td className="b">check</td><td><span className="cls cls--dev">health</span></td><td className="mono">wenvy doctor</td><td className="mono dim">{api.status === "online" ? "API online" : "waiting"}</td></tr>
+              <tr><td className="b">push</td><td><span className="cls cls--prod">snapshot</span></td><td className="mono">wenvy push snapshot.enc</td><td className="mono dim">intent + blob + commit</td></tr>
+              <tr><td className="b">pull</td><td><span className="cls cls--prod">snapshot</span></td><td className="mono">wenvy pull --output-file pulled.enc</td><td className="mono dim">same Worker API</td></tr>
             </tbody>
           </table>
         </div>
 
         <div className="col">
-          <h2 className="sect">Latest events</h2>
+          <h2 className="sect">Live surfaces</h2>
           <ul className="feed">
-            <li><span className="feed__t">09:41</span><span className="r-ok">ok</span><p><b>rishit</b> pushed <code>payments-api</code> ← <span className="hl">staging</span></p></li>
-            <li><span className="feed__t">09:36</span><span className="r-deny">denied</span><p><b>ishaan</b> push to <span className="hl">production</span>, role <code>editor</code> blocked</p></li>
-            <li><span className="feed__t">09:22</span><span className="r-ok">ok</span><p>rotation <code>team/core-platform</code> reached <span className="hl">repo_keys_rewrapped</span></p></li>
-            <li><span className="feed__t">08:57</span><span className="r-ok">ok</span><p><b>adheesh</b> shared <code>edge-config</code> with <b>rishit</b></p></li>
-            <li><span className="feed__t">08:40</span><span className="r-warn">warn</span><p>svc <code>gh-actions-prod</code> hit pull rate ceiling</p></li>
+            <li><span className="feed__t">api</span><span className={api.status === "online" ? "r-ok" : "r-warn"}>{api.status === "online" ? "ok" : "wait"}</span><p><a href={api.apiBaseUrl} target="_blank" rel="noreferrer">{api.apiBaseUrl}</a> exposes the CLI data plane</p></li>
+            <li><span className="feed__t">dash</span><span className="r-ok">ok</span><p><a href={WENVY_DASHBOARD_URL} target="_blank" rel="noreferrer">{WENVY_DASHBOARD_URL}</a> reads the same API health and OpenAPI document</p></li>
+            <li><span className="feed__t">site</span><span className="r-ok">ok</span><p><a href={WENVY_LANDING_URL} target="_blank" rel="noreferrer">{WENVY_LANDING_URL}</a> remains the landing surface</p></li>
+            <li><span className="feed__t">npm</span><span className="r-ok">ok</span><p><a href={`https://www.npmjs.com/package/${WENVY_CLI_PACKAGE}`} target="_blank" rel="noreferrer">{WENVY_CLI_PACKAGE}</a> is the package used by the demo commands</p></li>
+            <li><span className="feed__t">branch</span><span className="r-ok">ok</span><p><code>{WENVY_DEFAULT_BRANCH}</code> is the default branch shown in CLI and dashboard setup</p></li>
           </ul>
         </div>
       </div>
