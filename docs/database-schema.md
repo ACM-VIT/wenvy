@@ -621,6 +621,7 @@ Unique constraint:
 - (`commit_id`)
 
 Note: The 1:1 relationship with commits means every commit must reference a snapshot. Merge commits that fast-forward without changing secrets should still create a snapshot entry pointing to the same blob as the parent. Metadata-only commits (e.g., branch policy changes) do not create commits in this table — they are handled in the policy/audit domain.
+The current Worker data-plane migration stores operational repo, branch, commit, and idempotency identifiers as opaque text IDs so the HTTPS push/pull routes can become Postgres-authoritative before the full identity and repo catalog FKs are introduced.
 
 ## `blobs`
 Purpose: Pointer and integrity metadata for object storage.

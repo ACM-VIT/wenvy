@@ -1,20 +1,23 @@
 import {
-  applyPushCommit,
-  applyPushIntent,
-  emptyBranchPushState,
-  normalizeBranchPushState,
-  pullBranch,
-  type BranchPushState
-} from "@wenvy/domain";
+  createRepoMetadataRepository,
+  type BranchRef,
+  type RepoMetadataRepository
+} from "../persistence/postgres/repo-metadata-repository.js";
+import type { WorkerEnv } from "../worker-env.js";
 
-interface WriteIntentInput {
+interface BranchScopedInput {
+  readonly repoId: string;
+  readonly branch: string;
+}
+
+interface WriteIntentInput extends BranchScopedInput {
   readonly expectedHead: string | null;
   readonly nextCommit: string;
   readonly idempotencyKey: string;
   readonly payloadFingerprint?: string;
 }
 
-interface FinalizePushInput {
+interface FinalizePushInput extends BranchScopedInput {
   readonly expectedHead: string | null;
   readonly commit: string;
   readonly parentCommit: string | null;
@@ -27,16 +30,16 @@ interface FinalizePushInput {
   readonly createdAt: string;
 }
 
-interface PullInput {
+interface PullInput extends BranchScopedInput {
   readonly knownHead?: string | null;
 }
 
 export class RepoBranchCoordinator implements DurableObject {
-  private readonly ctx: DurableObjectState;
+  private readonly repository: RepoMetadataRepository;
 
-  constructor(ctx: DurableObjectState, env: unknown) {
-    void env;
-    this.ctx = ctx;
+  constructor(ctx: DurableObjectState, env: WorkerEnv) {
+    void ctx;
+    this.repository = createRepoMetadataRepository(env);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -47,9 +50,7 @@ export class RepoBranchCoordinator implements DurableObject {
 
     if (url.pathname === "/write-intent") {
       const input = (await request.json()) as WriteIntentInput;
-      const state = await this.getBranchState();
-      const decision = applyPushIntent(state, input);
-      await this.ctx.storage.put("branch-state", decision.state);
+      const decision = await this.repository.createPushIntent(branchRef(input), input);
 
       return Response.json(decision, {
         status:
@@ -59,9 +60,7 @@ export class RepoBranchCoordinator implements DurableObject {
 
     if (url.pathname === "/finalize-push") {
       const input = (await request.json()) as FinalizePushInput;
-      const state = await this.getBranchState();
-      const decision = applyPushCommit(state, input);
-      await this.ctx.storage.put("branch-state", decision.state);
+      const decision = await this.repository.finalizePush(branchRef(input), input);
 
       return Response.json(decision, {
         status:
@@ -71,8 +70,7 @@ export class RepoBranchCoordinator implements DurableObject {
 
     if (url.pathname === "/pull") {
       const input = (await request.json()) as PullInput;
-      const state = await this.getBranchState();
-      const decision = pullBranch(state, input);
+      const decision = await this.repository.pullBranch(branchRef(input), input);
 
       return Response.json(decision, {
         status: decision.status === "missing-snapshot" ? 409 : 200
@@ -81,9 +79,11 @@ export class RepoBranchCoordinator implements DurableObject {
 
     return Response.json({ error: "not-found" }, { status: 404 });
   }
+}
 
-  private async getBranchState(): Promise<BranchPushState> {
-    const state = (await this.ctx.storage.get<Partial<BranchPushState>>("branch-state")) ?? emptyBranchPushState;
-    return normalizeBranchPushState(state);
-  }
+function branchRef(input: BranchScopedInput): BranchRef {
+  return {
+    repoId: input.repoId,
+    branch: input.branch
+  };
 }

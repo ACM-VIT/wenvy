@@ -112,6 +112,39 @@ describe("Hono route regression", () => {
     expect(env.WENVY_BLOBS.put).toHaveBeenCalledOnce();
   });
 
+  it("forwards push intents with repo and branch scope", async () => {
+    const forwardedRequests: Request[] = [];
+    const env = fakeEnv({
+      repoBranchFetch: async (request) => {
+        forwardedRequests.push(request.clone());
+        return Response.json({ status: "accepted", commit: "commit_01JY7X0WENVYAAA", headCommit: null });
+      }
+    });
+
+    const response = await createHonoApp().fetch(
+      new Request("https://wenvy.test/v1/repos/repo_01JY7X0WENVYAAA/branches/main/push/intent", {
+        method: "POST",
+        body: JSON.stringify({
+          expectedHead: null,
+          nextCommit: "commit_01JY7X0WENVYAAA",
+          idempotencyKey: "idem_01JY7X0WENVYAAA",
+          payloadFingerprint: "a".repeat(64)
+        })
+      }),
+      env,
+      fakeExecutionContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(forwardedRequests).toHaveLength(1);
+    expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/write-intent");
+    await expect(forwardedRequests[0]!.json()).resolves.toMatchObject({
+      repoId: "repo_01JY7X0WENVYAAA",
+      branch: "main",
+      nextCommit: "commit_01JY7X0WENVYAAA"
+    });
+  });
+
   it("forwards validated push finalization to the branch coordinator", async () => {
     const forwardedRequests: Request[] = [];
     const env = fakeEnv({
@@ -149,6 +182,8 @@ describe("Hono route regression", () => {
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/finalize-push");
     await expect(forwardedRequests[0]!.json()).resolves.toMatchObject({
+      repoId: "repo_01JY7X0WENVYAAA",
+      branch: "main",
       expectedHead: null,
       commit: "commit_01JY7X0WENVYAAA",
       parentCommit: null,
@@ -197,6 +232,8 @@ describe("Hono route regression", () => {
     expect(forwardedRequests).toHaveLength(1);
     expect(new URL(forwardedRequests[0]!.url).pathname).toBe("/pull");
     await expect(forwardedRequests[0]!.json()).resolves.toEqual({
+      repoId: "repo_01JY7X0WENVYAAA",
+      branch: "main",
       knownHead: "commit_01JY7X0WENVYAAA"
     });
   });

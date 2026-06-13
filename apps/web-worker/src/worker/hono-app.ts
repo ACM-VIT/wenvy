@@ -64,7 +64,11 @@ export function createHonoApp(): Hono<AppBindings> {
 
     return stub.fetch("https://repo-branch-coordinator/write-intent", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify({
+        repoId,
+        branch,
+        ...input
+      })
     });
   });
 
@@ -78,6 +82,8 @@ export function createHonoApp(): Hono<AppBindings> {
     const response = await stub.fetch("https://repo-branch-coordinator/finalize-push", {
       method: "POST",
       body: JSON.stringify({
+        repoId,
+        branch,
         expectedHead: input.expectedHead,
         commit: input.commitId,
         parentCommit: input.parentCommitId,
@@ -129,7 +135,11 @@ export function createHonoApp(): Hono<AppBindings> {
 
     return stub.fetch("https://repo-branch-coordinator/pull", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify({
+        repoId,
+        branch,
+        ...input
+      })
     });
   });
 
