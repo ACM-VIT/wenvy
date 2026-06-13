@@ -29,7 +29,6 @@ export default function App() {
 
       {/* ---------- hero ---------- */}
       <section className="hero" aria-labelledby="wordmark">
-        <Koi className="koi koi--tl" />
         <Koi className="koi koi--br" />
 
         <motion.div className="hero__inner" variants={container} initial="hidden" animate="show">
