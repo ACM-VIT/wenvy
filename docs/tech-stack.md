@@ -1,206 +1,114 @@
 # Tech Stack
 
-Reviewed: 2026-06-13
+Reviewed: 2026-06-19
 
-Wenvy should be built as a Cloudflare-first platform for the dashboard, HTTP control plane, storage, coordination, security edge, and background orchestration. The CLI and raw SSH gateway stay outside the Worker runtime because Wenvy depends on local cryptography and inbound SSH/TCP behavior.
+## 1. Primary Stack
 
-See `platform-decisions.md` for the decision matrix and source links.
+| Layer | Choice | Responsibility |
+|---|---|---|
+| CLI and key agent | Go, Cobra | Local encrypted state, K-V index, merge, crypto, SSH protocol, memory-only unlock agent |
+| Local storage | Structured encrypted files initially; BoltDB only if required | `.wenvy` objects, index, worktree, refs, envelopes, and stash |
+| SSH gateway | Go, `golang.org/x/crypto/ssh` | Ed25519 authentication and typed fetch/push protocol |
+| Dashboard/API | Cloudflare Workers, Hono, React, Vite, TypeScript | Governance, auth, policy, directory, and orchestration APIs |
+| API contract | OpenAPI 3.1 | Source of truth for HTTPS control-plane interfaces |
+| Metadata | Managed Postgres through Hyperdrive | Relational source of truth |
+| Ciphertext objects | Private Cloudflare R2 | Account bundles and immutable item payloads |
+| Coordination | Durable Objects | Ref compare-and-swap serialization, token consumption, leases, rate counters |
+| Async fanout | Cloudflare Queues and Cron Triggers | Email, GitHub reconciliation, checks, alerts |
+| Rotation orchestration | Cloudflare Workflows | Durable workflow waiting for signed client artifacts |
+| Read-mostly cache | Workers KV | Non-authoritative public configuration only |
+| GitHub RBAC | Organization-installed GitHub App | Read-only organization/team membership |
+| Observability | Workers Logs, Analytics Engine, Logpush, optional Sentry | Operational telemetry; Postgres remains audit source |
 
-## 1. Stack Goals
+## 2. Go Crypto Dependencies
 
-1. Preserve zero-knowledge secret handling: plaintext encryption and decryption happen on client devices only.
-2. Keep CLI push/pull workflows low-latency and reliable.
-3. Use Cloudflare-native products where they match the workload.
-4. Avoid Cloudflare products where consistency or protocol limitations would weaken the design.
-5. Keep a clean path from MVP to multi-tenant production.
+Use standard or well-maintained audited implementations; do not implement primitives manually.
 
-## 2. Recommended Primary Stack
+- Argon2id and HKDF: `golang.org/x/crypto`.
+- XChaCha20-Poly1305: `golang.org/x/crypto/chacha20poly1305`.
+- Ed25519: Go `crypto/ed25519`.
+- X25519: Go `crypto/ecdh`.
+- HPKE: select a maintained RFC 9180-compatible Go implementation only after interoperability and test-vector review; pin the exact module and version in the crypto ADR.
+- SSH: `golang.org/x/crypto/ssh`.
+- BIP39 encoding: a maintained library with fixed test vectors; the mnemonic is encoding, not the KDF.
+- Canonical objects and wire control frames: deterministic CBOR compliant with RFC 8949.
 
-## CLI
+Do not use `age` SSH recipients, Ed25519-to-X25519 conversion, RSA OAEP, or SSH private keys for Wenvy envelopes.
 
-- Language: Go
-- Packaging: single static binary per platform
-- CLI framework: Cobra
-- SSH client: `golang.org/x/crypto/ssh`
-- Crypto: `filippo.io/age` plus `golang.org/x/crypto/chacha20poly1305`
-- Local metadata: JSON files under `.wenvy/`; use BoltDB only if local metadata becomes too complex for small files
+## 3. CLI Architecture
 
-Why:
-- Fast startup and simple cross-platform distribution.
-- Good SSH and filesystem ergonomics.
-- Keeps all secret plaintext handling on the user device.
+- One static binary per supported OS/architecture.
+- A local user-session agent holds decrypted keys in locked memory where supported and clears them on lock, timeout, or process exit.
+- IPC is local-user restricted and challenge authenticated.
+- Secret values are accepted by prompt, stdin, or file descriptor, not positional arguments.
+- Structured serializers use RFC 8949 deterministic CBOR with cross-language golden fixtures.
+- Local encrypted files use atomic write-rename and fsync behavior appropriate to each platform.
 
-## SSH Gateway
+## 4. SSH Gateway
 
-- Language: Go
-- SSH server: `gliderlabs/ssh` or `golang.org/x/crypto/ssh`
-- Public edge: Cloudflare Tunnel for MVP; Cloudflare Spectrum if public L4 TCP proxying is required and plan availability fits
-- Origin runtime: small container/VM service, or Cloudflare Containers only after validating the exact ingress path for SSH
-- Protocol: length-prefixed JSON frames over SSH channels
+- Accept only `ssh-ed25519` and security-key Ed25519 user keys.
+- Disable arbitrary shell, port forwarding, agent forwarding, X11, and filesystem subsystems.
+- Dispatch a versioned typed protocol over SSH exec/channel frames.
+- Enforce frame-size limits before allocation and stream ciphertext blobs.
+- Share authorization contracts with the Worker control plane rather than duplicating policy semantics.
+- Deploy on a VM/container behind Cloudflare Tunnel for MVP; evaluate Spectrum for public L4 edge.
 
-Why:
-- Cloudflare Workers currently support outbound TCP sockets, but not inbound raw TCP connections to a Worker. A real SSH server is still required.
-- Tunnel removes public origin ports for MVP.
-- Spectrum is the Cloudflare edge option for public TCP/UDP services when available.
+Cloudflare Workers cannot serve inbound raw SSH, so Workers-only SSH is not an option.
 
-## Web Dashboard and HTTP API
+## 5. Worker Control Plane
 
-- Runtime: Cloudflare Workers
-- Dashboard: React + Vite + TypeScript served through Workers Static Assets
-- API framework: Hono on Workers
-- API specification: OpenAPI 3.1 as the source of truth
-- Client SDK generation: `openapi-generator`, `oapi-codegen`, or a typed TypeScript client generated from the OpenAPI schema
-- Optional SSR alternative: Next.js on Workers via OpenNext, only if the dashboard needs Next-specific SSR/App Router features
+- Hono routes generated/validated against OpenAPI 3.1.
+- React/Vite dashboard contains no secret decryption code.
+- Hyperdrive connects to production Postgres.
+- R2 access remains private and mediated by authenticated operations.
+- Durable Objects coordinate only hot consistency paths; Postgres receives durable authoritative results.
+- Service bindings isolate public API, queue consumers, and workflows as the deployment grows.
 
-Why:
-- Workers can host static assets and backend APIs in one deployment.
-- Hono keeps the control plane small and Worker-native.
-- React + Vite is enough for a governance dashboard and avoids unnecessary SSR/runtime coupling.
+## 6. Key Transparency
 
-Migration note:
-- The current `api/` Phoenix skeleton is a prototype artifact, not the preferred Cloudflare-native control plane. Keep it only if the team intentionally chooses a hybrid origin architecture.
+- Merkle construction and canonical leaf/checkpoint formats use a small shared library with test vectors.
+- Directory signing key lives in Cloudflare Secrets Store or Worker secrets.
+- Three witness services run under separate credentials and at least two hosting failure domains outside the primary control-plane account.
+- CLI releases embed witness public keys and enforce two-of-three quorum.
+- Witness endpoints verify consistency before signing and persist their last accepted checkpoint.
 
-## Data and Storage
+## 7. Data and Storage Rules
 
-- Production metadata source of truth: managed Postgres
-- Cloudflare access layer: Hyperdrive binding from Workers to Postgres
-- Encrypted snapshot storage: R2 private buckets
-- Strong coordination: Durable Objects
-- Read-mostly edge cache: Workers KV for non-authoritative config only
-- Optional prototype database: D1 for early low-write experiments, not production source of truth
+- Postgres, not D1 or KV, is production source of truth.
+- R2 object names are UUID/content identifiers and never include tenant, repository, branch, or secret names.
+- Durable Objects do not become the sole durable copy of branch heads, grants, or jobs.
+- KV never stores sessions, revocations, branch heads, policies, memberships, envelopes, or one-time tokens.
+- All database access uses tenant-scoped queries and explicit transactions for activation paths.
 
-Why:
-- Wenvy needs relational integrity, auditability, constraints, and transactional branch state. Postgres remains the safest production choice.
-- Hyperdrive gives Workers pooled access to the regional Postgres database.
-- R2 is the right Cloudflare object store for encrypted blobs.
-- Durable Objects replace Redis-style locks and single-use-token coordination.
-- KV is eventually consistent and must not hold security-critical mutable state.
+## 8. Async Classes
 
-## Async Processing
+- `email`
+- `github-sync`
+- `audit-fanout`
+- `consistency-checks`
+- `rotation-start`
+- `security-alerts`
 
-- General background work: Cloudflare Queues
-- Rotation saga orchestration: Cloudflare Workflows
-- Scheduled checks: Worker Cron Triggers
-- Queue classes:
-  - `email`
-  - `audit-events`
-  - `github-sync`
-  - `envelope-checks`
-  - `rotation-start`
+Queues carry IDs and hashes, never plaintext secrets or key material. Rotation Workflows hold only job/version metadata and wait for a client event containing signed encrypted artifacts.
 
-Why:
-- Queues fit retryable fanout and buffering.
-- Workflows fit multi-step key rotation with checkpoints, retries, and partial-failure recovery.
-- Cron Triggers are enough to schedule consistency checks and cleanup jobs.
+## 9. Security Tooling
 
-## GitHub App RBAC
+- Dependency and license scanning, SBOM generation, secret scanning, and signed release artifacts.
+- Crypto golden vectors on every supported platform.
+- Fuzzing for parsers, canonicalization, dotenv/JSON import, wire frames, commits, and envelopes.
+- Static analysis and race detection for CLI/gateway code.
+- WAF/rate limits and Turnstile for interactive HTTP abuse.
+- TOTP and WebAuthn for governance MFA.
+- Append-only audit table plus signed audit checkpoints exported to R2/SIEM.
 
-- Integration type: organization-installed GitHub App
-- SDK: GitHub REST API through a Worker-compatible client such as Octokit
-- Organization permission: `Members: read-only`
-- Repository permissions: none for RBAC sync
-- Authentication: short-lived installation access tokens
-- Events: `installation`, `membership`, `organization`, and `team`
-- Delivery: signed webhook endpoint -> `github-sync` Queue -> Postgres reconciliation
-- Scheduled repair: Cron-triggered full reconciliation at least every six hours
+## 10. Version Policy
 
-Why:
-- Installation identity and short-lived tokens avoid organization-wide personal access tokens.
-- Read-only membership access is sufficient to list organization and team members.
-- Webhooks reduce revocation delay; reconciliation repairs missed or reordered events.
+- Pin crypto dependencies exactly and review upgrades explicitly.
+- Pin Worker `compatibility_date` and advance deliberately.
+- Critical security fixes: target 48 hours; other dependency updates: two weeks.
+- Version every wire message, canonical object, envelope, KDF wrapper, and ciphertext suite.
+- Unknown versions fail closed.
 
-## Email and Notifications
+## 11. Deployment Environments
 
-- Provider: Resend, Postmark, or SES over HTTPS APIs
-- Templates: server-side rendered transactional templates in the Worker or a shared package
-- Abuse protection: WAF rate limiting plus Turnstile where user interaction exists
-
-Why:
-- Workers cannot send SMTP over port 25 by default. Use an HTTPS email provider API.
-- Magic links and invites need strong delivery and clear audit correlation.
-
-## Observability
-
-- Runtime logs: Workers Logs
-- Log export: Workers Logpush to R2 and/or external SIEM
-- Product/security metrics: Workers Analytics Engine
-- Error tracking: Sentry optional
-- Audit events: Postgres source of truth; never rely only on platform logs for audit
-
-Why:
-- Workers observability is native to the runtime.
-- Audit data must remain queryable by org, actor, target, and time range.
-- R2 is suitable for retained log exports.
-
-## 3. Security Stack
-
-1. TLS, WAF managed rules, WAF custom rules, and rate limiting at Cloudflare edge.
-2. Turnstile on login, invite, and recovery forms.
-3. Optional API Shield schema validation from the OpenAPI spec.
-4. Optional API Shield mTLS for enterprise machine-to-machine endpoints.
-5. Cloudflare Access for internal admin tools and staging dashboards.
-6. Cloudflare Secrets Store or Worker secrets for provider credentials and server-side signing keys.
-7. Key fingerprint pinning behavior in CLI.
-8. Audit log immutability strategy: append-only Postgres table plus periodic signed snapshots exported to R2.
-9. MFA stack:
-   - TOTP: `otplib` or equivalent for Worker-compatible validation.
-   - WebAuthn/FIDO2: WebAuthn server library that works in Workers, or a small origin service if required.
-   - Backup codes: 10 single-use codes generated at MFA enrollment, stored as Argon2id or bcrypt hashes.
-10. CI/CD service account auth:
-   - Scoped bearer tokens with SHA-256 or BLAKE2b hash storage.
-   - Token-bound asymmetric key pairs for envelope decryption.
-   - Per-token rate limiting and branch allow-lists.
-
-## 4. Branch Policy Implementation Stack
-
-1. Policy storage: Postgres (`branch_policies`, `branch_role_rules`).
-2. Policy evaluation path: Worker API and SSH gateway both call a shared authorization module or service.
-3. Pattern precedence: exact match > prefix wildcard > global wildcard > default-deny.
-4. Write serialization: `RepoBranchCoordinator` Durable Object per repo branch.
-5. Approval workflow state: Postgres, with Durable Objects used only for coordination and idempotency.
-6. Audit hooks: emit event per denied/allowed protected-branch action.
-7. Branch deletion governance: enforced in SSH gateway and Worker API before any branch state mutation.
-
-## 5. Deployment Targets
-
-## MVP
-
-- Dashboard/API: single Worker with Static Assets and Hono API routes.
-- Database: managed Postgres through Hyperdrive.
-- Object storage: private R2 bucket.
-- Coordination: Durable Objects for branch locks and token consumption.
-- Background jobs: Queues and Workflows.
-- SSH gateway: Go container/VM behind Cloudflare Tunnel.
-- Email: Resend or Postmark HTTPS API.
-
-## Scale-up
-
-- Split dashboard, public API, internal admin API, queue consumers, and workflow entrypoints into separate Workers.
-- Use separate Hyperdrive configs for read/write or environment-specific database access.
-- Add Cloudflare Load Balancing for SSH gateway origins where Tunnel/Spectrum topology requires it.
-- Add Logpush to R2 plus external SIEM.
-- Enable API Shield schema validation and mTLS for enterprise service-account endpoints.
-- Use Spectrum for public SSH edge if plan availability and cost are acceptable.
-
-## 6. Optional Alternatives
-
-1. Keep Phoenix/Elixir API as an origin service if the team prefers Phoenix, but place it behind Cloudflare Tunnel and keep Workers as the edge/auth layer.
-2. Use D1 for a small hosted prototype if Postgres operations are too heavy at MVP time. Document this in an ADR and re-evaluate before multi-tenant launch.
-3. Use Next.js with OpenNext if dashboard SSR becomes important.
-4. Use Rust instead of Go for SSH gateway if the team has stronger Rust expertise.
-
-## 7. Version and Dependency Policy
-
-1. Pin Worker `compatibility_date` and advance it deliberately.
-2. Pin major versions for crypto and auth dependencies.
-3. Establish regular dependency audit cadence.
-4. Run SBOM generation and vulnerability scanning in CI.
-5. Crypto library selection rationale:
-   - Prefer `filippo.io/age` for SSH key-based envelope encryption.
-   - Prefer `golang.org/x/crypto/chacha20poly1305` for symmetric AEAD.
-   - Avoid rolling custom crypto; use audited, well-maintained libraries only.
-6. Cloudflare binding policy:
-   - Define all bindings in `wrangler.jsonc` or `wrangler.toml`.
-   - Use separate dev/staging/prod resources.
-   - Never share production R2 buckets, Durable Object namespaces, queues, or Hyperdrive configs with preview environments.
-7. Dependency update SLA: critical security patches within 48 hours; non-critical within 2 weeks.
+Development, staging, and production use separate Postgres databases, Hyperdrive configs, R2 buckets, Durable Object namespaces, queues, workflow bindings, signing keys, and witness policies. Production data or keys are never shared with preview environments.

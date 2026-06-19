@@ -2,163 +2,173 @@
 
 ## 1. Security Baseline
 
-1. No plaintext secret logging anywhere.
-2. All auth tokens stored as hashes, never raw values.
-3. One-time tokens must be single-use and short-lived.
-4. Session cookies must be secure, HTTP-only, and strict same-site.
-5. Mandatory audit event emission for sensitive actions.
-6. Cloudflare WAF managed/custom rules and rate limiting protect public HTTP endpoints.
-7. Turnstile protects login, invite, and recovery forms where user interaction exists.
-8. Cloudflare Secrets Store or Worker secrets hold provider credentials only; Wenvy customer plaintext secrets are never server-side credentials.
+1. Secret key names, values, decrypted keys, master passwords, recovery mnemonics, and raw tokens are prohibited from logs, traces, audits, queues, crash reports, and support bundles.
+2. SSH authentication, X25519 encryption, and Ed25519 signing keys are distinct.
+3. Every account recipient key must be active in a two-of-three witnessed directory checkpoint.
+4. All mutable security decisions use Postgres/Durable Objects, never eventually consistent KV.
+5. Branch writes fail closed unless crypto state is `active`.
+6. Ref updates use expected-head compare-and-swap.
+7. Rotation activation is transactional and requires complete envelope coverage.
+8. Production credentials and resources are isolated from preview environments.
+9. Audit records are append-only to application identities and periodically checkpointed.
+10. Client and gateway parsers enforce size/depth limits before allocation.
 
-## 2. Monitoring and Alerting
+## 2. Security Signals
 
-## Authentication Signals
+### Identity and authentication
 
-1. Failed SSH authentication spikes.
-2. Magic-link issuance and validation anomalies.
-3. Bridge token reuse attempts.
-4. MFA failure spikes (brute-force TOTP attempts).
-5. Service account token validation failures.
-6. Invalid GitHub webhook signatures and duplicate delivery spikes.
+- Magic-link or bridge-token replay, browser/IP binding mismatch, or rate-limit breach.
+- SSH proof failure, revoked-key use, unusual new SSH key, or abnormal geography.
+- Account-key recovery, unsigned replacement, witness-quorum failure, or checkpoint rollback.
+- Primary-email change, MFA removal, or recovery-policy violation.
 
-## Authorization Signals
+### Authorization and versioning
 
-1. Denied access attempts across repos/teams.
-2. Unexpected role elevation actions.
-3. High-frequency member removal/addition patterns.
-4. Repeated denied writes to protected branches (`staging`, `production`).
-5. **SSH data-plane rate limit breaches**: alerts when a user or service account exceeds push/pull rate thresholds, indicating possible exfiltration by a compromised key.
-6. Service account access outside allowed branch scope.
-7. GitHub-derived role elevation, stale reconciliation, and installation suspension.
+- Denied branch reads/writes, attempted policy bypass, or access outside service-account allow-list.
+- Force-with-lease attempt on a protected branch.
+- Repeated stale-head updates, oversized fetch/push, or abnormal ciphertext download volume.
+- Invalid commit signature, missing target projection metadata, or malformed parent graph.
 
-## Crypto Lifecycle Signals
+### Crypto lifecycle
 
-1. Rotation job failures.
-2. Envelope creation mismatch counts.
-3. Inconsistent active key version references.
-4. **Envelope consistency drift**: alerts when the background envelope consistency checker finds team members missing envelopes for the active team key version.
-5. Rotation jobs stuck beyond SLA threshold.
+- Active member without Group Key envelope.
+- Active branch grant without Group-to-Vault envelope coverage.
+- Item version missing a DEK envelope required by a referenced branch tree.
+- New item version referencing compromised/retired Vault Key.
+- Branch stuck in `rotation_required` or `rotating` beyond SLA.
+- Rotation artifact signature/version/snapshot mismatch.
 
-## Cloudflare Platform Signals
+### Transparency
 
-1. Workers Logs for request failures, uncaught exceptions, and structured security log lines.
-2. Workers Analytics Engine for high-cardinality product/security metrics.
-3. Workers Logpush to R2 and/or SIEM for retained runtime logs.
-4. WAF Security Events for blocked/challenged traffic.
-5. Turnstile challenge failure rates on auth forms.
-6. Queue dead-letter or retry exhaustion events.
-7. Workflow stuck/failure events for rotation jobs.
-8. Durable Object alarm failures or write-serialization errors.
+- Invalid inclusion or consistency proof.
+- Witnesses signing different roots for the same tree size.
+- Witness lag, quorum loss, checkpoint rollback, or unexpected witness-set change.
+- Key-directory event not signed by the previous account key where required.
 
-## 3. Audit Strategy
+## 3. Alert Severity
 
-Critical events to capture:
+- Critical: plaintext logging, directory equivocation, unauthorized ref movement, successful use of revoked credentials, key activation without quorum, or envelope activation missing required readers.
+- High: unsigned account recovery, rotation SLA breach, abnormal bulk reads, invalid commit/envelope signatures, or persistent consistency drift.
+- Medium: repeated denied operations, stale GitHub reconciliation, witness degradation with quorum retained, or unusual key registration.
+- Low: ordinary failed authentication and recoverable idempotency conflicts.
 
-1. Login success/failure (web and SSH).
-2. Invite issuance and acceptance.
-3. Team membership changes.
-4. Role changes and admin actions.
-5. Key additions, revocations, and rotations.
-6. Push/pull/share operations (metadata only, never secret values).
-7. Branch policy changes and branch rule exceptions.
-8. Protected-branch approvals and rejections.
-9. Service account token creation, usage, and revocation.
-10. MFA enrollment, verification, and bypass events.
-11. Recovery key generation and usage events.
-12. Multi-team repo access grants and revocations.
-13. Branch deletion events.
-14. GitHub App installation, mapping, override, reconciliation, and effective-role changes.
+## 4. Audit Events
 
-Audit records should be immutable and queryable by org scope and time range.
-Audit actor attribution supports users, service accounts, the GitHub App, and system jobs.
+Audit:
 
-## 4. Operational Runbooks
+- Email, MFA, session, SSH key, account-key, and recovery lifecycle.
+- Directory entries, checkpoints, witness signatures, and proof failures.
+- Organization/group membership, invitations, access requests, personal-group grants, and GitHub-derived changes.
+- Branch grants, policy changes, protected requests, approvals, and ref updates.
+- Group/Vault key creation, compromise, envelope provisioning, rotation claims, and activation.
+- Service-account creation, token/key lifecycle, and every data operation.
 
-## Incident: Suspected Key Compromise
+Audit metadata contains identifiers, versions, hashes, counts, result codes, and request correlation only. It never contains decrypted key names or values.
 
-1. Revoke compromised SSH key.
-2. Revoke active web sessions for user.
-3. Remove user from sensitive teams if needed.
-4. Trigger immediate team and repo key rotations.
-5. Review access and pull audit timeline.
-6. Freeze sensitive branches until rotation completes if required.
-7. If the compromised key belongs to a service account, revoke the service account token and all associated envelopes.
-8. Check for abnormal pull volume from the compromised key in the period before discovery.
-9. Raise Cloudflare rate limits or WAF blocks temporarily for affected accounts/IP ranges if active abuse continues.
+## 5. Consistency Checkers
 
-## Incident: Token Abuse
+Run incremental checks continuously and a full scan at least every six hours:
 
-1. Invalidate token family and active sessions.
-2. Enforce temporary rate-limit escalation.
-3. Alert security channel.
-4. Require re-auth for privileged actions.
+1. Active account keys have valid witnessed inclusion checkpoints.
+2. Active group members have envelopes for the active Group Key.
+3. Active branch grants have envelopes for required Vault Key versions.
+4. Every tree-referenced item version has a valid DEK envelope for its branch epoch.
+5. No new object references compromised/retired key versions.
+6. Branch active key/version columns agree with envelope tables.
+7. No revoked SSH key or token authenticates an active session.
+8. R2 ciphertext hashes and sizes match Postgres metadata.
+9. Commit/tree/parent references are reachable and internally consistent.
 
-## Incident: GitHub Integration Compromise
+Drift emits a high-severity event and freezes writes where confidentiality or integrity could be affected. Repair requires signed client artifacts when key material is involved; server jobs cannot synthesize keys.
 
-1. Disable the installation in Wenvy and fail closed for GitHub-derived grants.
-2. Rotate the GitHub App private key and webhook secret.
-3. Revoke active installation tokens by suspending or uninstalling the app when necessary.
-4. Review webhook deliveries, mapping changes, user links, and effective-role audit events.
-5. Reconcile from GitHub before restoring access.
-6. Rotate affected team/repo keys if unauthorized envelope access may have occurred.
+## 6. Rotation SLO
 
-## Incident: Data Store Leak
+- Authorization revocation: transactionally immediate.
+- Branch write block: same transaction or before revocation response succeeds.
+- User notification and rotation job creation: under one minute.
+- Standard client-assisted rotation after a legitimate client is online: target five minutes for groups up to 50 members and 100 affected branches.
+- No availability deadline permits writing under a compromised Vault Key.
 
-1. Confirm leak scope (Postgres/R2 logs).
-2. Validate encryption boundaries remained intact.
-3. Rotate service-side credentials.
-4. Initiate customer notification workflow as policy requires.
-5. **Verify that no plaintext secrets are exposed**: DB leak exposes only ciphertext envelopes and encrypted blobs; confirm no plaintext logging violations occurred.
-6. If R2 blobs leaked: confirm repo keys are not exposed (they are encrypted by team keys, which are encrypted by SSH keys — a three-layer envelope).
-7. Consider precautionary team key rotation for all affected orgs even if encryption boundaries are intact.
+## 7. Incident Runbooks
 
-## 5. Backup and Recovery
+### Suspected SSH key compromise
 
-1. Back up metadata DB with point-in-time recovery capability.
-2. Version and replicate R2 object storage where retention policy requires it.
-3. Periodically test restore into isolated staging.
-4. Validate commit graph, branch heads, and blob reference integrity post-restore.
+1. Revoke the SSH key and active sessions using it.
+2. Review its authenticated operations and download volume.
+3. Do not rotate secret keys solely because an SSH key was stolen unless evidence shows the account bundle was also unlocked.
+4. Notify user and administrators.
 
-### Crypto Consistency After Restore
+### Suspected account private-key compromise
 
-5. **Critical**: if a DB restore rolls back to a point before a key rotation but object storage retains blobs encrypted with the new (post-rotation) repo key, those blobs become undecryptable (the new repo key envelope is lost in the rollback).
-6. Mitigation: R2 replication/versioning policy should include recovery points synchronized with DB backup timestamps.
-7. Recovery procedure for crypto drift:
-   - Identify mismatched `repo_key_version` references between DB and blob metadata.
-   - If DB is behind: re-run the rotation from its checkpoint state (rotation jobs are idempotent).
-   - If blobs are behind: the restored blobs are on an older repo key that still exists in DB — no data loss, but the system should detect and alert on version mismatches.
-8. Include envelope consistency validation in the post-restore checklist: verify every active team member has envelopes for the current active key version.
+1. Suspend the account key and user access.
+2. Mark every Group Key received by that account compromised.
+3. Mark reachable branch Vault Keys compromised and block writes.
+4. Rotate account key through witnessed recovery.
+5. Run client-assisted Group/Vault rotations for remaining members.
+6. Review all signatures and reads during the exposure window.
 
-## 5a. Envelope Consistency Checker
+Do not use the routine account-key rewrap path as the only response: a compromised old account key may already have exposed every Group Key it received.
 
-A background job that runs periodically (configurable, default every 6 hours) and validates the following invariants:
+### Removed member
 
-1. Every active team member has a `team_key_envelope` for the team's `active_key_version`.
-2. Every active service account with access has a `service_account_envelope` for the team's `active_key_version`.
-3. Every active repo has a `repo_key_version` wrapped with the team's `active_key_version`.
-4. No envelopes reference a revoked SSH key.
-5. No envelopes reference a deleted or suspended user.
+1. Confirm authorization removal committed before responding success.
+2. Confirm affected branches are write-blocked.
+3. Track rotation claim and activation.
+4. Verify the removed account receives no new envelopes or ciphertext fetches.
+5. Record that historical data may remain known.
 
-On drift detection:
-- Emit a `security_event` with severity `high`.
-- Alert the org admin channel.
-- Optionally trigger automated envelope repair (re-wrap by an available admin device) if auto-repair is enabled.
+### Directory equivocation or witness compromise
 
-## 6. Compliance and Governance Readiness
+1. Freeze account-key enrollment, rotation, recovery, and Group Key provisioning.
+2. Preserve conflicting checkpoints and witness responses.
+3. Continue existing secret operations only for clients whose pinned checkpoint remains consistent.
+4. Revoke compromised witness through a witnessed policy event and signed client release.
+5. Require explicit checkpoint recovery review before reopening provisioning.
 
-1. Access review cadence per organization.
-2. Role assignment least-privilege checks.
-3. Retention rules for audit/security events.
-4. Break-glass and account recovery policy documentation.
+### Database or R2 leak
 
-## 7. Service Reliability Targets
+1. Preserve forensic state and rotate infrastructure credentials.
+2. Confirm no plaintext logging or object-name leakage.
+3. Validate that account bundles, item payloads, and envelopes remain ciphertext.
+4. Assess whether account private keys were independently compromised before triggering customer-key rotation.
+5. Notify affected organizations according to incident policy.
 
-1. Define SLO for push/pull and auth endpoints.
-2. Define max allowed delay for key rotation completion.
-3. Add health checks for SSH gateway, Worker API, Hyperdrive/Postgres, Durable Objects, Queues, Workflows, and R2.
-4. Use graceful degradation: governance UI can remain available during object store incidents.
-5. Track authorization decision latency including branch policy evaluation path.
-6. Define SLA for rotation job completion: e.g., team key rotation must complete within 5 minutes for teams with ≤50 members.
-7. Define SLA for envelope consistency checker: drift must be detected within one checker cycle.
-8. Monitor service account token usage patterns and flag anomalies.
+### Malicious or invalid ref movement
+
+1. Freeze the branch and preserve ref-update/audit records.
+2. Verify expected-head transaction, coordinator logs, commit signature, and object graph.
+3. Restore the last valid head with an audited owner-approved operation.
+4. Rotate keys only if unauthorized payload access also occurred.
+
+## 8. Backup and Restore
+
+- Postgres: point-in-time recovery with encrypted backups.
+- R2: retention/versioning policy aligned with database recovery window.
+- Transparency witnesses: durable last-checkpoint storage and independent backups.
+- Audit checkpoints: signed exports to separate retention storage/SIEM.
+
+Restore order:
+
+1. Restore Postgres to selected point.
+2. Restore/verify corresponding R2 object set.
+3. Rebuild caches and Durable Object coordination state from Postgres.
+4. Validate commit reachability, blob hashes, active versions, envelope coverage, rotation states, and transparency consistency.
+5. Keep affected branches frozen until validation passes.
+
+A database restore that loses a newly activated envelope/key version while retaining newer ciphertext can make data unreadable. Activation manifests and encrypted artifacts therefore require retention at least as long as the longest database/R2 recovery window.
+
+## 9. Local Security Guidance
+
+- Auto-lock the key agent on configurable timeout, logout, suspend, or explicit `wenvy lock`.
+- Use OS memory locking where available and avoid core dumps for the agent.
+- Warn before plaintext export and set restrictive file permissions.
+- Recommend `wenvy run` over exported `.env` files.
+- Redact values by default from diff, show, conflicts, and diagnostics.
+- Never send values through positional CLI arguments.
+
+## 10. Compliance Readiness
+
+- Organization access reviews include effective role, source, branch grant, and envelope state.
+- Retention policies cover audit, security events, GitHub deliveries, directory checkpoints, and rotation manifests.
+- Break-glass recovery is explicit, witnessed, high-severity, and cannot silently bypass key history.
+- Security documentation distinguishes authorization revocation, forward cryptographic revocation, and historical-data re-encryption.

@@ -1,184 +1,100 @@
 # Roadmap and Milestones
 
-## 1. Phase 0: Architecture Freeze
+## Milestone 0: Architecture Freeze
 
-Deliverables:
+Outcomes:
 
-1. Finalized crypto/key hierarchy decisions (including Ed25519→X25519 conversion approach).
-2. Finalized schema and API contracts (OpenAPI 3.1 spec, SSH wire protocol spec).
-3. Threat model baseline.
-4. Canonical snapshot format specification frozen.
-5. `.wenvy/` local directory layout specification frozen.
-6. Forward secrecy trade-off documented and accepted.
-7. Platform service decisions frozen:
-   - Workers Static Assets + Hono for dashboard/API.
-   - Postgres + Hyperdrive for production metadata.
-   - R2 for encrypted blobs.
-   - Durable Objects for token consumption and branch write serialization.
-   - Queues + Workflows for async jobs and rotation saga.
-   - Tunnel for MVP SSH ingress; Spectrum evaluated for public L4 edge.
+- Crypto suite, key hierarchy, transparency quorum, schema, canonical objects, and threat-model limitations approved.
+- CLI command/behavior contract and branch projection semantics frozen.
+- OpenAPI and SSH protocol schemas ready for implementation.
+- Required ADR owners assigned.
 
-Exit criteria:
+Gate: every document uses the approved account-key, Group Key, branch Vault Key, item-version DEK, client-side merge, and forward-only revocation model.
 
-- Architecture docs approved.
-- No open blocker decisions.
-- OpenAPI schema generates valid client stubs.
-- Wire protocol interop test between CLI and gateway passes.
-- `wrangler` binding names and dev/staging/prod resource split are documented.
+## Milestone 1: Local Git-Like MVP
 
-## 2. Phase 1: CLI and Local Encryption MVP
+Outcomes:
 
-Deliverables:
+- CLI enrollment/unlock/recovery.
+- Encrypted local repository, key-level index, commits, branches, K-V merge, and local stash.
+- Deterministic object/signature vectors and default value redaction.
 
-1. Local repo initialization (`.wenvy/` directory structure).
-2. Snapshot canonicalization (lexicographic sort, UTF-8, SHA-256 hash).
-3. Local encrypt/decrypt pipeline (XChaCha20-Poly1305 via `age`).
-4. Commit metadata and signature model (Ed25519 SSH signing).
-5. Recovery key generation (BIP39 mnemonic) and local envelope test.
-6. Three-way merge conflict detection for env key-value pairs.
+Gate: complete local workflow with no network and no implicit plaintext files.
 
-Exit criteria:
+## Milestone 2: Witnessed Multi-User Crypto
 
-- Local round-trip stable.
-- Snapshot hash deterministic.
-- Recovery key round-trip works.
-- Merge conflicts detected and resolved interactively.
+Outcomes:
 
-## 3. Phase 2: SSH Push/Pull and Metadata Backend
+- Key directory and three witnesses.
+- Groups, personal groups, branch Vault Keys, item DEKs, invitations/access requests, and one-envelope n+1 onboarding.
+- Multiple verified emails and SSH auth keys.
 
-Deliverables:
+Gate: two users share a branch through witnessed account keys; adding the second user changes no branch/item envelopes.
 
-1. SSH auth and command dispatch.
-2. Cloudflare Tunnel-published SSH gateway for MVP.
-3. R2 encrypted blob storage flow.
-4. Commit/branch metadata persistence in Postgres through Hyperdrive-backed Worker APIs.
-5. Basic audit event capture.
-6. Branch head concurrency through Durable Objects.
+## Milestone 3: Remote Repository
 
-Exit criteria:
+Outcomes:
 
-- End-to-end push/pull across two devices for one user.
-- Branch head consistency checks pass.
-- SSH ingress works without exposing a public origin port in MVP topology.
+- SSH gateway, clone/fetch/push, R2 item storage, Postgres graph/ref state, and branch coordinators.
+- Idempotent object upload and expected-head ref movement.
 
-## 4. Phase 3: Teams, Sharing, RBAC
+Gate: concurrent-client and retry tests preserve one valid branch history.
 
-Deliverables:
+## Milestone 4: Branch Isolation and Collaboration
 
-1. Team and role management.
-2. Envelope distribution for team members.
-3. Repo-to-team authorization controls.
-4. Branch policy engine with `dev`, `staging`, `production` defaults.
-5. Protected-branch controls for production-grade branches.
-6. Branch pattern precedence (exact > prefix wildcard > global wildcard > default-deny).
-7. Branch deletion governance.
-8. Multi-team repo access (`repo_team_access` junction table).
-9. Multi-device SSH key addition flow (envelope re-wrap from existing device).
-10. Recovery key envelope creation during team join.
+Outcomes:
 
-Exit criteria:
+- Distinct branch readers and Vault Keys.
+- Target projection commits, conflicts, protected change requests, approvals, and stale-base handling.
+- Complete Git-like status/diff/log/branch/merge/stash UX.
 
-- Share and decrypt across users works.
-- Role restrictions enforced.
-- Branch-level restrictions enforced even when repo role allows broader access.
-- Unmatched branches fall through to default-deny.
-- Protected branch deletion blocked without owner approval.
-- Secondary team members can access shared repos with role ceiling enforcement.
-- New SSH key receives envelopes via re-wrap from existing device.
+Gate: a source-only reader cannot decrypt target-only data, and a protected merge never requires server plaintext.
 
-## 5. Phase 4: Passwordless Web and SSH Bridge
+## Milestone 5: Governance and Automation
 
-Deliverables:
+Outcomes:
 
-1. Email magic-link login with browser session fingerprint binding.
-2. SSH-to-web bridge login with IP binding.
-3. Session revocation and device visibility.
-4. MFA enrollment and verification (TOTP + WebAuthn).
-5. Org-level MFA policy enforcement (disabled/optional/required/required_for_admins).
-6. CI/CD service account creation and scoped token issuance.
-7. Service account envelope distribution and branch allow-lists.
+- Passwordless web governance, bridge login, MFA, effective-access inspection.
+- Service accounts with signed requests and branch allow-lists.
+- Organization policy and audit surfaces.
 
-Exit criteria:
+Gate: web sessions cannot decrypt secrets; automation remains least-privilege and fully attributable.
 
-- Browser login works without passwords.
-- Bridge token flow single-use, short-lived, and IP-bound.
-- Magic links reject usage from non-originating browser.
-- MFA challenge works for sensitive dashboard actions.
-- Service account can pull secrets for allowed branches only.
-- Service account token revocation immediately blocks access.
+## Milestone 6: Revocation and Rotation
 
-## 6. Phase 5: Rotation and Security Hardening
+Outcomes:
 
-Deliverables:
+- Immediate denial, branch write gates, Workflows waiting for client artifacts, leases, validation, and atomic activation.
+- Consistency checkers and incident runbooks.
 
-1. Member removal workflow.
-2. Team/repo key rotation automation with Cloudflare Workflows and saga/compensation pattern.
-3. Security event detection and alerting through Workers Logs, Analytics Engine, Logpush, and Postgres audit queries.
-4. Branch policy bypass detection and alerting.
-5. Envelope consistency background checker through Cron Triggers and Queues.
-6. SSH data-plane rate limiting (per-user and per-repo throttles).
-7. Backup/restore procedure with crypto consistency validation.
-8. Partial rotation failure recovery via checkpoint-based retry.
-9. WAF custom rules, WAF rate limiting, Turnstile, and API Shield schema validation reviewed for production.
+Gate: removed members cannot decrypt post-rotation versions, and no availability fallback permits compromised-key writes.
 
-Exit criteria:
+## Milestone 7: GitHub and Production Readiness
 
-- Revocation tested with rotation completion.
-- Audit trail complete for all privileged actions.
-- Partial rotation failure is recoverable without data loss.
-- Envelope consistency drift detected and alerted within one checker cycle.
-- SSH rate limits prevent rapid exfiltration by compromised keys.
-- Backup restore validated with envelope consistency check.
-- R2 object retention, Postgres PITR, and Logpush retention are tested together.
+Outcomes:
 
-## 7. Phase 6: Developer Experience and Integrations
+- Read-only GitHub organization/team reconciliation into groups.
+- Production observability, rate limits, backups, restore drills, audit checkpoints, and witness operations.
+- Security review and external cryptographic/protocol assessment.
 
-Deliverables:
+Gate: missed events converge, restore drills pass all crypto/graph checks, and launch-blocking findings are closed.
 
-1. Organization-installable GitHub App with read-only `Members` permission.
-2. Verified GitHub identity linking using immutable GitHub user IDs.
-3. Organization default roles, GitHub team mappings, and role ceiling.
-4. User-level grant, cap, and deny overrides with reason and expiry.
-5. Signed webhook processing and scheduled full reconciliation.
-6. Effective-access inspector and dry-run diff before enforcement.
-7. Immediate authorization revocation and queued key rotation on access loss.
-8. Optional VS Code integration.
-9. Improved merge and conflict UX.
-10. Evaluate Spectrum for public SSH edge and Cloudflare Containers for any HTTP-mediated container workloads.
+## Product KPIs
 
-GitHub authorization rules:
-- GitHub is authoritative for linked organization and team membership.
-- Wenvy remains authoritative for local owners, branch policy, role ceilings, and user overrides.
-- GitHub-derived access can grant at most `admin`.
-- Explicit Wenvy denies and branch policy always win.
-- Removals deny online access immediately; any configured grace period applies only to destructive key rotation.
+- Median local `status`/`diff`, remote fetch/push, and unlock latency.
+- Median invitation acceptance to active envelope access.
+- Number of envelopes changed during user addition: target exactly one per group.
+- Time from authorization removal to branch write gate.
+- Time from online legitimate client to completed rotation.
+- Protected-change stale/superseded rate.
+- Witness quorum availability and checkpoint lag.
+- Envelope/graph consistency drift count.
+- Plaintext leakage incidents: target zero.
+- Mean developer onboarding time and successful first clone/commit/push rate.
 
-Exit criteria:
+## Staffing Areas
 
-- Installation, webhook, and reconciliation reliability validated.
-- User overrides remain independent from GitHub-derived grants and are visible in effective-access explanations.
-- Removed GitHub members cannot fetch envelopes or blobs after sync.
-- GitHub App requests no repository permission and cannot mutate GitHub membership.
-- Developer onboarding time reduced measurably.
-
-## 8. KPI Suggestions
-
-1. Median push and pull latency.
-2. Share-to-access provisioning time.
-3. Rotation completion duration (with SLA: ≤5 minutes for teams ≤50 members).
-4. Failed auth and denied access rates.
-5. Secrets incident count and mean time to containment.
-6. Unauthorized protected-branch write attempts.
-7. Envelope consistency drift detection rate (target: 0 undetected drift per month).
-8. Service account token usage vs. rate limit breach frequency.
-9. MFA enrollment coverage across org members.
-10. Recovery key enrollment rate.
-11. Mean time from member removal to rotation completion.
-12. Magic link and bridge token interception attempt rate.
-
-## 9. Suggested Team Allocation
-
-1. Core platform engineer: SSH, metadata, branch consistency, policy engine, and wire protocol.
-2. Security engineer: crypto model, auth token, MFA, rotation correctness, and envelope consistency.
-3. Full-stack engineer: web auth, governance UI, and service account management dashboard.
-4. DevOps engineer: deployment, observability, backup/recovery, and crypto consistency validation.
+- Client/crypto: CLI, key agent, K-V model, canonical objects, merge, and envelopes.
+- Platform: Worker API, Postgres, R2, Durable Objects, Queues, Workflows, and SSH gateway.
+- Identity/security: auth, transparency witnesses, recovery, audit, incident response, and review.
+- Product/frontend: governance dashboard, access explanations, onboarding, and protected-change UX.

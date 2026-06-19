@@ -1,111 +1,88 @@
-graph TB
-    subgraph "Client Layer"
-        CLI[CLI Client<br/>- Encrypt/decrypt locally<br/>- Sign commits<br/>- Merge conflicts]
-        WebUI[Web Browser<br/>- Email auth<br/>- Team management<br/>- Audit reports]
-        CICD[CI/CD Pipeline<br/>- Scoped API tokens<br/>- Branch allow-lists]
-        GitHub[GitHub App<br/>- Org/team membership<br/>- Signed webhooks<br/>- Read-only Members permission]
+flowchart TB
+    subgraph Client[Trusted client boundary]
+        CLI[Wenvy CLI<br/>K-V working state and index<br/>merge, sign, encrypt, decrypt]
+        Agent[Memory-only key agent<br/>master/recovery unlock]
+        Local[Encrypted .wenvy state<br/>objects, refs, index, stash]
+        CLI <--> Agent
+        CLI <--> Local
     end
 
-    subgraph "Cloudflare Edge"
-        Edge[DNS + TLS<br/>WAF / Rate Limiting<br/>Turnstile]
-        Access[Cloudflare Access<br/>Internal and staging apps]
-        APIShield[API Shield<br/>Schema validation / optional mTLS]
+    subgraph Identity[External identity and automation]
+        Email[Email provider]
+        GitHub[GitHub App<br/>read-only membership]
+        CICD[CI/CD service account<br/>token + signed requests]
     end
 
-    subgraph "Cloudflare Workers Platform"
-        AppWorker[Dashboard + API Worker<br/>Static Assets + Hono<br/>OpenAPI contracts]
-        QueueWorkers[Queue Consumers<br/>Email retries<br/>Audit fanout<br/>GitHub sync<br/>Envelope checks]
-        RotationWF[Workflows<br/>Rotation saga<br/>Checkpointed retries]
-        BranchDO[Durable Objects<br/>Branch write serialization<br/>Single-use tokens<br/>Rate counters]
-        KV[Workers KV<br/>Read-mostly config cache]
+    subgraph Edge[Cloudflare edge]
+        Web[Dashboard and API Worker<br/>governance only]
+        Tunnel[Cloudflare Tunnel or Spectrum]
+        SSH[Go SSH gateway<br/>typed fetch/push protocol]
+        DO[Durable Objects<br/>tokens, refs, rotation leases]
+        Queues[Queues and Cron<br/>email, sync, checks]
+        WF[Workflows<br/>wait for client rotation artifacts]
+        Web --> DO
+        Web --> Queues
+        Web --> WF
+        Tunnel --> SSH
+        SSH --> DO
     end
 
-    subgraph "SSH Data Plane"
-        Tunnel[Cloudflare Tunnel / Spectrum<br/>TCP edge for SSH]
-        SSH[Go SSH Gateway<br/>- Authenticate SSH keys<br/>- Authorize commands<br/>- Push / pull / share<br/>- Issue bridge tokens]
+    subgraph Transparency[Key transparency]
+        Log[Append-only Merkle directory]
+        W1[Witness 1]
+        W2[Witness 2]
+        W3[Witness 3]
+        Log --> W1
+        Log --> W2
+        Log --> W3
     end
 
-    subgraph "State Layer"
-        Hyperdrive[Hyperdrive<br/>Postgres connection pooling]
-        PG[(Managed Postgres<br/>- Identity/auth<br/>- RBAC relations<br/>- Branch policies<br/>- Crypto metadata<br/>- Commits/branches<br/>- Audit events)]
-        R2[(Cloudflare R2<br/>Encrypted snapshots only<br/>Log exports)]
+    subgraph State[Untrusted for secret plaintext]
+        Hyperdrive[Hyperdrive]
+        PG[(Postgres<br/>identity, RBAC, envelopes,<br/>commits, refs, audit, jobs)]
+        R2[(R2<br/>encrypted bundles and<br/>item payloads only)]
+        Hyperdrive --> PG
     end
 
-    subgraph "Security Material"
-        Secrets[Cloudflare Secrets Store<br/>Provider credentials<br/>Non-secret-data signing keys]
-    end
-
-    subgraph "Trust Boundaries"
-        TB1[Trusted: User device + private keys]
-        TB2[Semi-trusted: Server control plane]
-        TB3[Untrusted: Network + storage dumps]
-    end
-
-    WebUI -->|HTTPS| Edge
-    CICD -->|HTTPS bearer token| Edge
-    GitHub -->|HTTPS webhooks| Edge
     CLI -->|SSH| Tunnel
-
-    Edge --> AppWorker
-    Edge -.-> Access
-    Edge -.-> APIShield
-    Tunnel --> SSH
-
-    AppWorker --> BranchDO
-    AppWorker --> Hyperdrive
-    AppWorker --> R2
-    AppWorker --> KV
-    AppWorker --> QueueWorkers
-    AppWorker --> RotationWF
-    QueueWorkers --> Hyperdrive
-    QueueWorkers -->|Installation token reconciliation| GitHub
-    QueueWorkers --> R2
-    RotationWF --> BranchDO
-    RotationWF --> Hyperdrive
-    RotationWF --> R2
-
-    SSH --> BranchDO
+    CLI -->|HTTPS governance and proofs| Web
+    CICD -->|HTTPS| Web
+    Web --> Hyperdrive
+    Web --> R2
     SSH --> Hyperdrive
     SSH --> R2
-    SSH --> AppWorker
+    Queues --> Hyperdrive
+    WF --> Hyperdrive
+    WF -.->|rotation claim/event| CLI
+    Web --> Log
+    CLI -->|inclusion + consistency proofs| Log
+    Email --> Web
+    GitHub -->|signed webhooks| Web
+    Queues -->|reconcile| GitHub
 
-    Hyperdrive --> PG
-    AppWorker -.-> Secrets
-    QueueWorkers -.-> Secrets
-    RotationWF -.-> Secrets
-
-    CLI -.->|Plaintext exists only here| TB1
-    AppWorker -.->|Metadata only| TB2
-    SSH -.->|Metadata + ciphertext only| TB2
-    R2 -.->|Ciphertext objects| TB3
-    PG -.->|No plaintext secrets| TB3
-
-    subgraph "Branch Access Control"
-        B1[1. Validate identity]
-        B2[2. Check org/team membership]
-        B3[3. Check repo permission]
-        B4[4. Match branch policy]
-        B5[5. Serialize branch update in Durable Object]
-        B6[6. Persist audit and branch state]
-
-        B1 --> B2 --> B3 --> B4 --> B5 --> B6
+    subgraph Keys[Envelope hierarchy]
+        UK[User X25519 key]
+        GK[Group Key]
+        VK[Branch Vault Key]
+        DEK[Item-version DEK]
+        Payload[Encrypted key + value]
+        UK --> GK --> VK --> DEK --> Payload
     end
 
-    AppWorker -.->|Evaluates| B1
-    SSH -.->|Evaluates| B1
+    CLI -.->|creates and unwraps| Keys
+    R2 -.->|stores ciphertext| Payload
+    PG -.->|stores envelopes| GK
+    PG -.->|stores envelopes| VK
+    PG -.->|stores envelopes| DEK
 
-    subgraph ".wenvy/ Local Directory"
-        LC[config.json<br/>head.json<br/>branches/<br/>envelopes/<br/>snapshots/<br/>keys/<br/>logs/]
+    subgraph RefFlow[Branch update]
+        A[Authenticate SSH key]
+        B[Authorize group and branch policy]
+        C[Require active crypto state]
+        D[Validate signed immutable objects]
+        E[Compare expected old head]
+        F[Move ref and audit transactionally]
+        A --> B --> C --> D --> E --> F
     end
 
-    CLI -.->|Maintains| LC
-
-    classDef trusted fill:#90EE90
-    classDef semiTrusted fill:#FFD700
-    classDef untrusted fill:#FFB6C1
-    classDef encrypted fill:#87CEEB
-
-    class TB1 trusted
-    class TB2 semiTrusted
-    class TB3 untrusted
-    class R2 encrypted
+    SSH -.-> RefFlow
