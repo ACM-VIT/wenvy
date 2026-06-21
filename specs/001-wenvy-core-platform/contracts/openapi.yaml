@@ -1,0 +1,609 @@
+openapi: 3.1.0
+info:
+  title: Wenvy Control Plane API
+  version: 1.0.0
+  description: >-
+    Governance and repository-negotiation API. Secret names, secret values,
+    private keys, DEKs, Group Keys, and Vault Keys are never accepted as plaintext.
+servers:
+  - url: https://api.example.invalid/v1
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      security: []
+      operationId: health
+      responses:
+        "200":
+          description: Process is ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /account:
+    get:
+      operationId: getCurrentAccount
+      responses:
+        "200":
+          description: Current account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        default:
+          $ref: "#/components/responses/Error"
+  /account/emails:
+    get:
+      operationId: listEmails
+      responses:
+        "200":
+          description: Account emails
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AccountEmail"
+    post:
+      operationId: addEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "202":
+          description: Verification pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountEmail"
+        default:
+          $ref: "#/components/responses/Error"
+  /account/emails/{email_id}/primary:
+    post:
+      operationId: switchPrimaryEmail
+      parameters:
+        - $ref: "#/components/parameters/EmailId"
+      responses:
+        "202":
+          description: Switch pending verification or completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountEmail"
+        default:
+          $ref: "#/components/responses/Error"
+  /ssh-identities/challenges:
+    post:
+      operationId: createSshIdentityChallenge
+      responses:
+        "201":
+          description: Short-lived challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SshChallenge"
+  /ssh-identities:
+    get:
+      operationId: listSshIdentities
+      responses:
+        "200":
+          description: Linked identities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SshIdentity"
+    post:
+      operationId: linkSshIdentity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SshIdentityProof"
+      responses:
+        "201":
+          description: Identity linked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SshIdentity"
+        "409":
+          description: Fingerprint already linked
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /ssh-identities/{identity_id}/revoke:
+    post:
+      operationId: revokeSshIdentity
+      parameters:
+        - $ref: "#/components/parameters/IdentityId"
+      responses:
+        "200":
+          description: Identity revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SshIdentity"
+        default:
+          $ref: "#/components/responses/Error"
+  /organizations:
+    get:
+      operationId: listOrganizations
+      responses:
+        "200":
+          description: Visible organizations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Organization"
+    post:
+      operationId: createOrganization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [slug, display_name]
+              properties:
+                slug:
+                  type: string
+                  pattern: "^[a-z0-9][a-z0-9-]{1,62}$"
+                display_name:
+                  type: string
+                  maxLength: 120
+      responses:
+        "201":
+          description: Organization created with default group
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Organization"
+        default:
+          $ref: "#/components/responses/Error"
+  /organizations/{organization_id}/groups:
+    get:
+      operationId: listGroups
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+      responses:
+        "200":
+          description: Organization groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Group"
+    post:
+      operationId: createGroup
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 120
+      responses:
+        "201":
+          description: Group created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Group"
+        default:
+          $ref: "#/components/responses/Error"
+  /repositories/{repository_id}/branches/{branch_id}/permissions:
+    get:
+      operationId: listBranchPermissions
+      parameters:
+        - $ref: "#/components/parameters/RepositoryId"
+        - $ref: "#/components/parameters/BranchId"
+      responses:
+        "200":
+          description: Explicit group grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BranchPermission"
+    put:
+      operationId: setBranchPermission
+      parameters:
+        - $ref: "#/components/parameters/RepositoryId"
+        - $ref: "#/components/parameters/BranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchPermissionInput"
+      responses:
+        "200":
+          description: Permission updated and rotation state evaluated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchPermissionResult"
+        default:
+          $ref: "#/components/responses/Error"
+  /repositories/{repository_id}/refs/{branch_id}:
+    get:
+      operationId: getBranchRef
+      parameters:
+        - $ref: "#/components/parameters/RepositoryId"
+        - $ref: "#/components/parameters/BranchId"
+      responses:
+        "200":
+          description: Authorized branch ref
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchRef"
+        default:
+          $ref: "#/components/responses/Error"
+  /repositories/{repository_id}/objects/negotiate:
+    post:
+      operationId: negotiateObjects
+      parameters:
+        - $ref: "#/components/parameters/RepositoryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ObjectNegotiation"
+      responses:
+        "200":
+          description: Missing object IDs and short-lived transfer grants
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectNegotiationResult"
+        default:
+          $ref: "#/components/responses/Error"
+  /repositories/{repository_id}/push/finalize:
+    post:
+      operationId: finalizePush
+      parameters:
+        - $ref: "#/components/parameters/RepositoryId"
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushFinalize"
+      responses:
+        "200":
+          description: Ref atomically updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchRef"
+        "409":
+          description: Non-fast-forward or rotation conflict
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /organizations/{organization_id}/audit-events:
+    get:
+      operationId: listAuditEvents
+      parameters:
+        - $ref: "#/components/parameters/OrganizationId"
+        - name: after
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Chronological immutable events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEvent"
+        default:
+          $ref: "#/components/responses/Error"
+  /rotations/{rotation_id}:
+    get:
+      operationId: getRotation
+      parameters:
+        - $ref: "#/components/parameters/RotationId"
+      responses:
+        "200":
+          description: Rotation status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Rotation"
+        default:
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+  parameters:
+    EmailId:
+      name: email_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdentityId:
+      name: identity_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OrganizationId:
+      name: organization_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RepositoryId:
+      name: repository_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BranchId:
+      name: branch_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RotationId:
+      name: rotation_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    Error:
+      description: Request failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [ready, degraded] }
+    Account:
+      type: object
+      additionalProperties: false
+      required: [id, handle, status, primary_email_id]
+      properties:
+        id: { type: string, format: uuid }
+        handle: { type: string }
+        status: { type: string, enum: [pending, active, suspended, closed] }
+        primary_email_id: { type: string, format: uuid }
+    AccountEmail:
+      type: object
+      additionalProperties: false
+      required: [id, email, status, primary]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        status: { type: string, enum: [pending, verified, held, removed] }
+        primary: { type: boolean }
+    SshChallenge:
+      type: object
+      additionalProperties: false
+      required: [id, challenge, expires_at]
+      properties:
+        id: { type: string, format: uuid }
+        challenge: { type: string, contentEncoding: base64 }
+        expires_at: { type: string, format: date-time }
+    SshIdentityProof:
+      type: object
+      additionalProperties: false
+      required: [challenge_id, public_key, signature, label]
+      properties:
+        challenge_id: { type: string, format: uuid }
+        public_key: { type: string }
+        signature: { type: string, contentEncoding: base64 }
+        label: { type: string, maxLength: 120 }
+    SshIdentity:
+      type: object
+      additionalProperties: false
+      required: [id, fingerprint, algorithm, label, status]
+      properties:
+        id: { type: string, format: uuid }
+        fingerprint: { type: string }
+        algorithm: { type: string }
+        label: { type: string }
+        status: { type: string, enum: [pending, active, revoked] }
+    Organization:
+      type: object
+      additionalProperties: false
+      required: [id, slug, display_name, kind, default_group_id]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        display_name: { type: string }
+        kind: { type: string, enum: [personal, shared] }
+        default_group_id: { type: string, format: uuid }
+    Group:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, name, kind, status]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        name: { type: string }
+        kind: { type: string, enum: [default, personal, custom] }
+        status: { type: string, enum: [active, archived] }
+    BranchPermissionInput:
+      type: object
+      additionalProperties: false
+      required: [group_id, level]
+      properties:
+        group_id: { type: string, format: uuid }
+        level: { type: string, enum: [none, read, write] }
+    BranchPermission:
+      allOf:
+        - $ref: "#/components/schemas/BranchPermissionInput"
+        - type: object
+          required: [id, branch_id]
+          properties:
+            id: { type: string, format: uuid }
+            branch_id: { type: string, format: uuid }
+    BranchPermissionResult:
+      type: object
+      additionalProperties: false
+      required: [permission, rotation_status]
+      properties:
+        permission: { $ref: "#/components/schemas/BranchPermission" }
+        rotation_status:
+          type: string
+          enum: [current, rotation_due, rotating, blocked, failed]
+    BranchRef:
+      type: object
+      additionalProperties: false
+      required: [branch_id, ref_version, rotation_status]
+      properties:
+        branch_id: { type: string, format: uuid }
+        head_commit_id: { type: [string, "null"] }
+        ref_version: { type: integer, minimum: 0 }
+        rotation_status:
+          type: string
+          enum: [current, rotation_due, rotating, blocked, failed]
+    ObjectDescriptor:
+      type: object
+      additionalProperties: false
+      required: [id, kind, version, size, checksum]
+      properties:
+        id: { type: string }
+        kind: { type: string }
+        version: { type: integer, minimum: 1 }
+        size: { type: integer, minimum: 1, maximum: 67108864 }
+        checksum: { type: string }
+    ObjectNegotiation:
+      type: object
+      additionalProperties: false
+      required: [direction, objects]
+      properties:
+        direction: { type: string, enum: [upload, download] }
+        objects:
+          type: array
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/ObjectDescriptor" }
+    TransferGrant:
+      type: object
+      additionalProperties: false
+      required: [object_id, method, url, expires_at, required_headers]
+      properties:
+        object_id: { type: string }
+        method: { type: string, enum: [GET, PUT] }
+        url: { type: string, format: uri }
+        expires_at: { type: string, format: date-time }
+        required_headers:
+          type: object
+          additionalProperties: { type: string }
+    ObjectNegotiationResult:
+      type: object
+      additionalProperties: false
+      required: [missing, grants]
+      properties:
+        missing:
+          type: array
+          items: { type: string }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/TransferGrant" }
+    PushFinalize:
+      type: object
+      additionalProperties: false
+      required: [branch_id, expected_ref_version, new_head_commit_id, object_ids]
+      properties:
+        branch_id: { type: string, format: uuid }
+        expected_head_commit_id: { type: [string, "null"] }
+        expected_ref_version: { type: integer, minimum: 0 }
+        new_head_commit_id: { type: string }
+        object_ids:
+          type: array
+          maxItems: 1000
+          items: { type: string }
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [sequence, id, action, target_type, target_id, occurred_at, event_hash]
+      properties:
+        sequence: { type: integer, minimum: 1 }
+        id: { type: string, format: uuid }
+        action: { type: string }
+        target_type: { type: string }
+        target_id: { type: string, format: uuid }
+        occurred_at: { type: string, format: date-time }
+        event_hash: { type: string }
+    Rotation:
+      type: object
+      additionalProperties: false
+      required: [id, target_type, target_id, status, required_generation]
+      properties:
+        id: { type: string, format: uuid }
+        target_type: { type: string, enum: [group, branch] }
+        target_id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [due, awaiting_client, ready, applying, complete, failed]
+        required_generation: { type: integer, minimum: 1 }
+    Error:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, request_id, retryable]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        code: { type: string }
+        request_id: { type: string }
+        retryable: { type: boolean }
+        safe_details:
+          type: object
+          additionalProperties: true
